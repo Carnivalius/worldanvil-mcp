@@ -20,6 +20,8 @@ import { handleToolCall } from "./handlers.js";
 import { parseToolGroups, filterTools } from "./tool-groups.js";
 import { loadSettings } from "./access/config.js";
 import { WorldAccess, guardClient } from "./access/guard.js";
+import { Backups } from "./access/backup.js";
+import { dirname, isAbsolute, join } from "path";
 
 /**
  * Tools this fork never offers: account changes, the image library,
@@ -92,9 +94,12 @@ export function createServer(config = {}) {
     authToken: config.authToken,
   });
 
-  const { settings, file } = config.access ?? loadSettings();
+  const { settings, file, backupDir } = config.access ?? loadSettings();
   const access = new WorldAccess({ settings, file });
-  guardClient(client, access);
+  // Backups live next to the settings file (never inside the repository).
+  const dir = backupDir ?? (isAbsolute(file) ? join(dirname(file), "backups") : null);
+  const backups = dir ? new Backups({ dir, keep: settings.item_backup_keep }) : null;
+  guardClient(client, access, backups);
 
   // Parse tool group filter (env var or config)
   const enabledGroups = parseToolGroups(

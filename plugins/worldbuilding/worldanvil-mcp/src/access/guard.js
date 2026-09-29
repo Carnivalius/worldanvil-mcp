@@ -384,9 +384,12 @@ export class WorldAccess {
 
 /**
  * Put a WorldAccess guard in front of a WorldAnvilClient. After this, every
- * client method is checked before its request is sent.
+ * client method is checked before its request is sent, and every edit or
+ * delete of an existing item is preceded by a local backup of that item.
+ *
+ * @param {object} [backups] - Backups instance (required for edits/deletes)
  */
-export function guardClient(client, access) {
+export function guardClient(client, access, backups = null) {
   const raw = Object.getPrototypeOf(client).request.bind(client);
   access.send = raw;
   Object.defineProperty(client, "request", {
@@ -395,6 +398,27 @@ export function guardClient(client, access) {
     value: async (endpoint, method = "GET", body = null) => {
       const decision = await access.check(endpoint, method, body);
       if (decision.path === "/user/worlds") await access.resolve();
+
+      // No backup, no change.
+      if ((decision.action === "update" || decision.action === "delete") && decision.id) {
+        if (!backups)
+          throw new AccessError("backups aren't configured, so changes are refused");
+        let current;
+        try {
+          current = await raw(`${decision.path}?id=${decision.id}&granularity=2`, "GET");
+          backups.saveItem({
+            worldId: decision.worldId,
+            worldTitle: access.worlds?.get(decision.worldId) ?? "",
+            path: decision.path,
+            id: decision.id,
+            action: decision.action,
+            data: current,
+          });
+        } catch (e) {
+          throw new AccessError(`couldn't back up the item first (${e.message}), so nothing was changed`);
+        }
+      }
+
       const response = await raw(endpoint, method, body);
       if (decision.path === "/user/worlds") return access.annotateWorldList(response);
       return response;
