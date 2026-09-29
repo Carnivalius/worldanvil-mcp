@@ -561,7 +561,11 @@ describe("History handlers", () => {
 // Both WA_AUTH_TOKEN and WA_APP_KEY are required to run integration tests.
 // Proxy mode (WA_AUTH_TOKEN only) is not used here because the public proxy
 // may be blocked by WorldAnvil's Cloudflare protection, causing test flakiness.
-const hasCredentials = !!process.env.WA_AUTH_TOKEN && !!process.env.WA_APP_KEY;
+// They also require an explicit opt-in, because they write to a real account.
+const hasCredentials =
+  !!process.env.WA_AUTH_TOKEN &&
+  !!process.env.WA_APP_KEY &&
+  process.env.WA_RUN_UPSTREAM_LIVE_TESTS === "1";
 const TIMEOUT = 30000;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const RATE_LIMIT_DELAY = 750;

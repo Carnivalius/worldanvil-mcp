@@ -19,7 +19,11 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { WorldAnvilClient } from '../src/api-client.js';
 
 // Skip all tests if credentials are not provided
-const hasCredentials = process.env.WA_APP_KEY && process.env.WA_AUTH_TOKEN;
+// Explicit opt-in required: these tests write to (and may pick) a real world.
+const hasCredentials =
+  process.env.WA_APP_KEY &&
+  process.env.WA_AUTH_TOKEN &&
+  process.env.WA_RUN_UPSTREAM_LIVE_TESTS === '1';
 
 // Test world configuration
 const TEST_WORLD_NAME = '[TEST] MCP Integration';
