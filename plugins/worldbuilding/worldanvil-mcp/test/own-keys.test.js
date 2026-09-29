@@ -90,10 +90,11 @@ describe("Own keys only", () => {
 });
 
 describe("No third-party hosts in server code", () => {
-  const sources = [
-    join(PACKAGE_DIR, "index.js"),
-    ...readdirSync(join(PACKAGE_DIR, "src")).map((f) => join(PACKAGE_DIR, "src", f)),
-  ];
+  const walk = (dir) =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],
+    );
+  const sources = [join(PACKAGE_DIR, "index.js"), ...walk(join(PACKAGE_DIR, "src"))];
 
   it("only references www.worldanvil.com as a network host", () => {
     expect(API_HOST).toBe("www.worldanvil.com");

@@ -43,8 +43,14 @@ export function getToolDefinitions() {
         type: "object",
         properties: {
           title: { type: "string", description: "The title of the world" },
+          access_level: {
+            type: "string",
+            enum: ["full_edit", "edit_only", "read_only"],
+            description:
+              "Access level for the new world in the user's access settings (confirm with the user first)",
+          },
         },
-        required: ["title"],
+        required: ["title", "access_level"],
       },
     },
     {

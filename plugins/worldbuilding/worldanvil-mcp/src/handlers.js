@@ -7,6 +7,34 @@
 import { markdownToBBCode, convertFieldsToBBCode } from "./utils.js";
 
 /**
+ * Article `fields` may only carry template text/number/yes-no values. They
+ * can never move, reclassify, publish or re-own an article; use the tool's
+ * own parameters (category_id, template) for the things those tools allow.
+ */
+const PROTECTED_FIELDS = new Set([
+  "id", "world", "category", "parent", "author", "owner", "user", "entityclass",
+  "templatetype", "template", "slug", "url", "state", "isdraft", "iswip",
+  "ispublic", "visibility", "passcode", "subscribergroups", "islocked",
+  "isadultcontent", "ishiddenfromtoc", "publicationdate", "notificationdate",
+  "allowcomments", "iseditable", "position",
+]);
+
+export function sanitizeFields(fields) {
+  if (fields === undefined) return {};
+  if (!fields || typeof fields !== "object" || Array.isArray(fields))
+    throw new Error("fields must be an object of template field values");
+  for (const [key, value] of Object.entries(fields)) {
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(key))
+      throw new Error(`"${key}" is not a valid template field name`);
+    if (PROTECTED_FIELDS.has(key.toLowerCase()))
+      throw new Error(`"${key}" can't be set through fields`);
+    if (value !== null && !["string", "number", "boolean"].includes(typeof value))
+      throw new Error(`field "${key}" must be text, a number or true/false`);
+  }
+  return convertFieldsToBBCode(fields);
+}
+
+/**
  * Create a successful response with JSON content
  * @param {*} data - Data to serialize as JSON
  * @returns {Object} MCP tool response
@@ -50,8 +78,18 @@ export async function handleToolCall(name, args, client) {
       case "worldanvil_get_world":
         return jsonResponse(await client.getWorld(args.world_id));
 
-      case "worldanvil_create_world":
-        return jsonResponse(await client.createWorld({ title: args.title }));
+      case "worldanvil_create_world": {
+        const level = args.access_level;
+        if (!["full_edit", "edit_only", "read_only"].includes(level))
+          throw new Error(
+            'access_level must be "full_edit", "edit_only" or "read_only" (ask the user which they want)',
+          );
+        const created = await client.createWorld({ title: args.title });
+        const note = client.access
+          ? `Added to your access settings as "${await client.access.onWorldCreated(created.id, args.title, level)}": ${level}`
+          : undefined;
+        return jsonResponse(note ? { ...created, access_settings: note } : created);
+      }
 
       case "worldanvil_update_world": {
         const data = {};
@@ -82,9 +120,7 @@ export async function handleToolCall(name, args, client) {
         if (args.content !== undefined)
           data.content = markdownToBBCode(args.content);
         if (args.icon !== undefined) data.icon = args.icon;
-        if (args.fields !== undefined && typeof args.fields === "object") {
-          Object.assign(data, convertFieldsToBBCode(args.fields));
-        }
+        Object.assign(data, sanitizeFields(args.fields));
         if (args.category_id) data.category = { id: args.category_id };
         return jsonResponse(await client.createArticle(data));
       }
@@ -95,9 +131,7 @@ export async function handleToolCall(name, args, client) {
         if (args.content !== undefined)
           data.content = markdownToBBCode(args.content);
         if (args.icon !== undefined) data.icon = args.icon;
-        if (args.fields !== undefined && typeof args.fields === "object") {
-          Object.assign(data, convertFieldsToBBCode(args.fields));
-        }
+        Object.assign(data, sanitizeFields(args.fields));
         if (args.category_id) data.category = { id: args.category_id };
         return jsonResponse(await client.updateArticle(args.article_id, data));
       }

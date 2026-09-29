@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from '../src/server.js';
+import { validateSettings } from '../src/access/config.js';
 
 describe('MCP Server Protocol', () => {
   let client;
@@ -20,6 +21,7 @@ describe('MCP Server Protocol', () => {
     const result = createServer({
       appKey: 'test-app-key',
       authToken: 'test-auth-token',
+      access: { settings: validateSettings({}), file: 'test-settings' },
     });
     server = result.server;
 

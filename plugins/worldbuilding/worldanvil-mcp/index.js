@@ -71,6 +71,9 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Fatal error:", error);
+  // Settings problems are explained in plain words; anything else gets detail.
+  console.error(
+    error?.name === "AccessConfigError" ? `Error: ${error.message}` : ["Fatal error:", error].join(" "),
+  );
   process.exit(1);
 });
