@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { config } from 'dotenv';
 
 // Load .env file for API credentials
@@ -14,6 +14,9 @@ export default defineConfig({
 
     // Include test files
     include: ['test/**/*.test.js'],
+
+    // Live harness tests only run via `npm run test:live` (vitest.live.config.js)
+    exclude: [...configDefaults.exclude, 'test/live/**'],
 
     // Coverage configuration
     coverage: {
