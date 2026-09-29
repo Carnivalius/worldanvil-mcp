@@ -21,6 +21,8 @@ export const PATHS = {
   env: join(PACKAGE_DIR, ".env.test"),
   ledger: join(PACKAGE_DIR, "test-ledger.json"),
   protected: join(PACKAGE_DIR, "protected-worlds.json"),
+  access: join(PACKAGE_DIR, "test-access.json"),
+  backups: join(PACKAGE_DIR, "test-backups"),
 };
 
 function readJson(file) {

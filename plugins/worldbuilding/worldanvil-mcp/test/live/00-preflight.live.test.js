@@ -25,7 +25,10 @@ describe.runIf(stage === "read")("stage 1: pre-flight (read only)", () => {
   });
 
   it("refuses a write in the read stage without sending it", async () => {
-    const res = await h.call("worldanvil_create_world", { title: "MCP-TEST-SHOULD-NOT-EXIST" });
+    const res = await h.call("worldanvil_create_world", {
+      title: "MCP-TEST-SHOULD-NOT-EXIST",
+      access_level: "full_edit",
+    });
     expect(res.isError).toBe(true);
     expect(res.text).toMatch(/REFUSED/);
   });

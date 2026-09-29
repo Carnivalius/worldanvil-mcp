@@ -77,7 +77,8 @@ export function missingArgs(tool, args) {
  * @property {string} [appKey] - World Anvil Application Key (defaults to WA_APP_KEY env var)
  * @property {string} [authToken] - World Anvil Auth Token (defaults to WA_AUTH_TOKEN env var)
  * @property {string} [toolGroups] - Comma-separated tool groups or preset (defaults to WA_TOOL_GROUPS env var)
- * @property {{settings: object, file: string}} [access] - world access settings (default: loaded from file)
+ * @property {{settings: object, file: string, backupDir?: string}} [access] - world access settings (default: loaded from file)
+ * @property {Function} [transport] - underlying request sender (tests/harness only)
  * @property {string} [name='worldanvil-mcp'] - Server name
  * @property {string} [version] - Server version (defaults to package.json version)
  */
@@ -99,7 +100,7 @@ export function createServer(config = {}) {
   // Backups live next to the settings file (never inside the repository).
   const dir = backupDir ?? (isAbsolute(file) ? join(dirname(file), "backups") : null);
   const backups = dir ? new Backups({ dir, keep: settings.item_backup_keep }) : null;
-  guardClient(client, access, backups);
+  guardClient(client, access, backups, config.transport);
 
   // Parse tool group filter (env var or config)
   const enabledGroups = parseToolGroups(

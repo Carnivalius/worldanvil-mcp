@@ -1,20 +1,30 @@
 /**
  * Live-test safety harness - the single choke point for World Anvil traffic.
  *
- * Live tests must obtain their client and tool-caller from createHarness().
- * Every request goes through guardedRequest(), which enforces policy.js
- * BEFORE anything is sent. No other test code may make network calls
- * (enforced by test/harness-static.test.js).
+ * Live tests must obtain their tool-caller from createHarness(). Two
+ * independent layers check every request before anything is sent:
+ *
+ *   1. The real server's world access settings (src/access), configured
+ *      allow-only with just the test world at full_edit (test-access.json).
+ *   2. This harness's transport (policy.js): protected-worlds snapshot,
+ *      MCP-TEST- ledger and staged runs.
+ *
+ * Tool calls go through a real MCP client/server pair, so tool visibility
+ * and argument checks are exercised too. No other test code may make
+ * network calls (enforced by test/harness-static.test.js).
  *
  * Usage (stage is required, one of read | create | update | delete):
  *   const h = await createHarness({ stage: "read" });
  *   const result = await h.call("worldanvil_get_world", { world_id: h.testWorldId });
  */
 
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, writeFileSync } from "fs";
 import { parse as parseEnv } from "dotenv";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { WorldAnvilClient } from "../../../src/api-client.js";
-import { handleToolCall } from "../../../src/handlers.js";
+import { createServer } from "../../../src/server.js";
+import { loadSettings } from "../../../src/access/config.js";
 import { GuardError, evaluateRequest, parseEndpoint } from "./policy.js";
 import {
   TEST_PREFIX,
@@ -60,6 +70,19 @@ function worldSlug(world) {
   return m ? m[1] : null;
 }
 
+/** Access settings the harness gives the real server: test world only. */
+export const HARNESS_ACCESS_SETTINGS = Object.freeze({
+  world_list: {},
+  allow_only: true,
+  default_access: "read_only",
+  allow_create_worlds: true,
+  allow_delete_worlds: false,
+  new_world_access: "full_edit",
+  item_backup_keep: 10,
+  world_backup_keep: 5,
+  allow_blocked_backup: false,
+});
+
 function createdId(response) {
   return response?.id ?? response?.entity?.id ?? null;
 }
@@ -87,14 +110,14 @@ export async function createHarness({ stage, paths = PATHS } = {}) {
     );
   const protectedWorlds = new ProtectedWorlds(paths.protected);
 
-  const client = new WorldAnvilClient({
+  const rawClient = new WorldAnvilClient({
     appKey: env.WA_APP_KEY,
     authToken: env.WA_AUTH_TOKEN,
   });
-  if (!client.appKey || client.apiBase !== DIRECT_API_HOST)
+  if (!rawClient.appKey || rawClient.apiBase !== DIRECT_API_HOST)
     throw new GuardError("client is not in direct mode", { abort: true });
 
-  const rawRequest = WorldAnvilClient.prototype.request.bind(client);
+  const rawRequest = WorldAnvilClient.prototype.request.bind(rawClient);
   const state = {
     stage,
     aborted: false,
@@ -129,7 +152,7 @@ export async function createHarness({ stage, paths = PATHS } = {}) {
     throw err;
   }
 
-  /** The choke point. Replaces client.request for all live test traffic. */
+  /** The choke point: the transport underneath the real server's own guard. */
   async function guardedRequest(endpoint, method = "GET", body = null) {
     let decision;
     try {
@@ -191,21 +214,14 @@ export async function createHarness({ stage, paths = PATHS } = {}) {
     return response;
   }
 
-  Object.defineProperty(client, "request", {
-    value: guardedRequest,
-    writable: false,
-    configurable: false,
-  });
-  Object.freeze(client);
-
   // ---- Identity + protected-worlds snapshot ------------------------------
-  const identity = await client.getIdentity();
+  const identity = await guardedRequest("/identity", "GET");
   state.userId = String(identity.id).toLowerCase();
   log(`account: ${identity.username}`);
 
   const worlds = [];
   for (let offset = 0; ; offset += 50) {
-    const page = await client.request(
+    const page = await guardedRequest(
       `/user/worlds?id=${state.userId}`,
       "POST",
       { limit: "50", offset: String(offset) },
@@ -235,6 +251,36 @@ export async function createHarness({ stage, paths = PATHS } = {}) {
       `(${added.length} newly added${firstRun ? ", first-run snapshot" : ""})`,
   );
 
+  // ---- The real server, restricted to the test world ------------------------
+  if (!existsSync(paths.access))
+    writeFileSync(paths.access, JSON.stringify(HARNESS_ACCESS_SETTINGS, null, 2) + "\n");
+  const { settings } = loadSettings({ file: paths.access, explicit: true, log });
+  const ledgerWorlds = ledger.worldIds();
+  const listed = Object.keys(settings.world_list);
+  if (
+    !settings.allow_only ||
+    settings.allow_delete_worlds ||
+    listed.some((k) => !ledgerWorlds.has(k.toLowerCase()) &&
+      !ledger.live().some((e) => e.path === "/world" && e.title === k))
+  )
+    refuse(
+      new GuardError(
+        "test-access.json must be allow-only and list nothing but test worlds",
+        { abort: true },
+      ),
+    );
+
+  const { server, client } = createServer({
+    appKey: env.WA_APP_KEY,
+    authToken: env.WA_AUTH_TOKEN,
+    access: { settings, file: paths.access, backupDir: paths.backups },
+    transport: guardedRequest,
+  });
+  Object.freeze(client);
+  const mcp = new Client({ name: "live-test-harness", version: "1.0.0" });
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  await Promise.all([mcp.connect(clientSide), server.connect(serverSide)]);
+
   // ---- Public harness API -------------------------------------------------
   return {
     client,
@@ -246,9 +292,21 @@ export async function createHarness({ stage, paths = PATHS } = {}) {
       return state.aborted;
     },
 
-    /** Call an MCP tool handler through the guarded client. */
+    /**
+     * Call a tool through the real MCP server. Arguments that mention a
+     * protected world abort the run before anything is sent.
+     */
     async call(toolName, args = {}) {
-      const result = await handleToolCall(toolName, args, client);
+      if (state.aborted)
+        return { isError: true, data: null, text: "[harness] REFUSED: run was aborted earlier" };
+      const hit = findProtectedReference(extractTokens(args), protectedWorlds.tokens());
+      if (hit) {
+        state.aborted = true;
+        process.exitCode = 1;
+        const text = `[harness] REFUSED: tool arguments reference a ${hit}`;
+        return { isError: true, data: null, text };
+      }
+      const result = await mcp.callTool({ name: toolName, arguments: args });
       const text = result?.content?.[0]?.text ?? "";
       let data;
       try {
@@ -259,11 +317,14 @@ export async function createHarness({ stage, paths = PATHS } = {}) {
       return { isError: !!result?.isError, data, text };
     },
 
-    /** Explicit, one-shot permission to create a test world. */
+    /**
+     * Explicit, one-shot permission to create a test world. Goes through the
+     * real create_world tool, which adds it to test-access.json.
+     */
     async createTestWorld(title) {
       state.allowWorldCreate = true;
       try {
-        return await client.createWorld({ title });
+        return await this.call("worldanvil_create_world", { title, access_level: "full_edit" });
       } finally {
         state.allowWorldCreate = false;
       }

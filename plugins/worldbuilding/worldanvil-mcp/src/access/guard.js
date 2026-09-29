@@ -388,9 +388,12 @@ export class WorldAccess {
  * delete of an existing item is preceded by a local backup of that item.
  *
  * @param {object} [backups] - Backups instance (required for edits/deletes)
+ * @param {Function} [transport] - underlying (endpoint, method, body) sender;
+ *   defaults to the client's own HTTPS request. The live-test harness passes
+ *   its own guarded transport here so both layers see every request.
  */
-export function guardClient(client, access, backups = null) {
-  const raw = Object.getPrototypeOf(client).request.bind(client);
+export function guardClient(client, access, backups = null, transport = null) {
+  const raw = transport ?? Object.getPrototypeOf(client).request.bind(client);
   access.send = raw;
   Object.defineProperty(client, "request", {
     configurable: false,

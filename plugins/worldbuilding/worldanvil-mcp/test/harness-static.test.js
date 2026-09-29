@@ -86,7 +86,7 @@ describe("no hard-coded world identifiers", () => {
 });
 
 describe("gitignore", () => {
-  for (const file of [PATHS.env, PATHS.ledger, PATHS.protected])
+  for (const file of [PATHS.env, PATHS.ledger, PATHS.protected, PATHS.access, PATHS.backups])
     it(`${relative(PACKAGE_DIR, file)} is ignored`, () => {
       expect(() => git(["check-ignore", "-q", file])).not.toThrow();
     });

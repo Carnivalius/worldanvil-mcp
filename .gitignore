@@ -12,6 +12,9 @@ test-ledger.json
 test-ledger.json.tmp
 protected-worlds.json
 protected-worlds.json.tmp
+test-access.json
+test-access.json.*
+test-backups
 
 # IDE
 .vscode/

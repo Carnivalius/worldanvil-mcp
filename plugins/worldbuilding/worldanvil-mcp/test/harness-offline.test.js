@@ -50,12 +50,15 @@ beforeEach(() => {
     env: join(dir, ".env.test"),
     ledger: join(dir, "test-ledger.json"),
     protected: join(dir, "protected-worlds.json"),
+    access: join(dir, "test-access.json"),
+    backups: join(dir, "test-backups"),
   };
   calls = [];
   worlds = [];
   entities = {};
   vi.spyOn(WorldAnvilClient.prototype, "request").mockImplementation(fakeTransport);
   vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -83,6 +86,10 @@ function seedLaterRun() {
     { id: REAL_A, title: "Real A" },
     { id: TEST_WORLD, title: "MCP-TEST-SCRATCH" },
   ];
+  writeFileSync(
+    paths.access,
+    JSON.stringify({ allow_only: true, world_list: { "MCP-TEST-SCRATCH": "full_edit" } }),
+  );
 }
 
 describe("pre-flight", () => {
@@ -154,6 +161,38 @@ describe("later runs", () => {
     await createHarness({ stage: "read", paths });
     const saved = JSON.parse(readFileSync(paths.protected, "utf8"));
     expect(saved.worlds.map((w) => w.id)).toEqual([REAL_A, REAL_B]);
+  });
+
+  it("refuses a harness settings file that lists a real world", async () => {
+    writeEnv();
+    seedLaterRun();
+    writeFileSync(
+      paths.access,
+      JSON.stringify({ allow_only: true, world_list: { "MCP-TEST-SCRATCH": "full_edit", "Real A": "full_edit" } }),
+    );
+    await expect(createHarness({ stage: "read", paths })).rejects.toThrow(/list nothing but test worlds/);
+  });
+
+  it("items outside the test world are refused by one of the two layers", async () => {
+    writeEnv();
+    seedLaterRun();
+    worlds.push({ id: REAL_B, title: "Created by the owner since last run" });
+    const h = await createHarness({ stage: "read", paths });
+    // An item (not a world id, so the argument scan can't catch it) that
+    // lives in a real world: nothing about it may be sent or returned.
+    entities[NEW_MS] = { id: NEW_MS, title: "x", world: { id: REAL_B } };
+    const res = await h.call("worldanvil_get_manuscript", { manuscript_id: NEW_MS });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/Access denied|REFUSED/);
+  });
+
+  it("never offers tools the settings switch off (delete world)", async () => {
+    writeEnv();
+    seedLaterRun();
+    const h = await createHarness({ stage: "delete", paths });
+    const res = await h.call("worldanvil_delete_world", { world_id: TEST_WORLD });
+    expect(res.text).toMatch(/Unknown tool/);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
   });
 
   it("locks the choke point so tests cannot swap the transport", async () => {
