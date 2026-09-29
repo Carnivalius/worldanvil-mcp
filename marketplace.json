@@ -1,12 +1,12 @@
 {
-  "name": "worldanvil-claude-plugin",
-  "description": "Claude Code plugins for WorldAnvil worldbuilding platform",
+  "name": "worldanvil-mcp-fork",
+  "description": "Independent fork of the World Anvil MCP plugin: your own keys only, direct to World Anvil, no proxies.",
   "version": "1.0.0",
   "author": {
-    "name": "Leighton Carden",
-    "url": "https://github.com/wlcarden"
+    "name": "Carnivalius",
+    "url": "https://github.com/Carnivalius"
   },
-  "repository": "https://github.com/wlcarden/worldanvil-claude-plugin",
+  "repository": "https://github.com/Carnivalius/worldanvil-mcp",
   "plugins": [
     "plugins/worldbuilding"
   ]

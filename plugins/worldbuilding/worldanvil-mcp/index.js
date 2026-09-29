@@ -6,10 +6,9 @@
  * Provides MCP tools for interacting with the World Anvil API from Claude Code.
  *
  * Environment variables:
- *   WA_AUTH_TOKEN   - World Anvil User Authentication Token (required)
- *   WA_APP_KEY      - World Anvil Application Key (optional; required only for
- *                     direct API mode. If omitted, the server uses proxy mode
- *                     and the proxy injects the application key.)
+ *   WA_AUTH_TOKEN   - Your World Anvil User Authentication Token (required)
+ *   WA_APP_KEY      - Your own World Anvil Application Key (required). This
+ *                     fork has no proxy mode and never uses anyone else's key.
  *   WA_TOOL_GROUPS  - Comma-separated tool groups or preset to load (optional;
  *                     defaults to 'all'). Reduces context overhead for LLMs.
  *                     Groups: core, content, images, campaign, maps, timeline,
@@ -30,19 +29,24 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "./src/server.js";
 
-// Validate environment variables
-// WA_APP_KEY is optional: omitting it enables proxy mode, where the proxy
-// injects the application key. WA_AUTH_TOKEN is always required.
+// Validate environment variables: both of YOUR keys are required, and no
+// proxy is allowed, so requests only ever go to World Anvil itself.
 const APP_KEY = process.env.WA_APP_KEY;
 const AUTH_TOKEN = process.env.WA_AUTH_TOKEN;
 
-if (!AUTH_TOKEN) {
-  console.error("Error: WA_AUTH_TOKEN environment variable must be set");
+if (process.env.WA_PROXY_URL) {
+  console.error(
+    "Error: WA_PROXY_URL is not supported. This server only talks to World Anvil directly.",
+  );
   process.exit(1);
 }
 
-if (!APP_KEY) {
-  console.error("Info: WA_APP_KEY not set — running in proxy mode");
+if (!AUTH_TOKEN || !APP_KEY) {
+  console.error(
+    "Error: both WA_AUTH_TOKEN (your user token) and WA_APP_KEY (your own " +
+      "application key) must be set. See README: 'You need two keys'.",
+  );
+  process.exit(1);
 }
 
 const TOOL_GROUPS = process.env.WA_TOOL_GROUPS;

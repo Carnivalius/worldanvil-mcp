@@ -1,0 +1,24 @@
+name: Tests
+
+# Runs the offline test suite only. This fork is never published to npm,
+# and CI never has World Anvil credentials.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/worldbuilding/worldanvil-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npm test

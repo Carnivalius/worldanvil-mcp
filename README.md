@@ -1,88 +1,70 @@
-# WorldAnvil MCP
+# World Anvil MCP (independent fork)
 
-MCP server for [WorldAnvil](https://www.worldanvil.com/) - the worldbuilding platform for writers, game masters, and creators.
+An MCP server that lets your AI tools (Claude Desktop, Claude Code, Open WebUI and other MCP clients) work with **your own** [World Anvil](https://www.worldanvil.com/) worlds, articles and manuscripts.
 
-Works with **Claude Code**, **Cursor**, **Windsurf**, **Cline**, and any MCP-compatible AI tool.
+This is an independent fork of [wlcarden/worldanvil-mcp](https://github.com/wlcarden/worldanvil-mcp). It is maintained separately, with a different approach, and is not intended to be merged back.
+
+## How this fork differs
+
+| | This fork | Upstream |
+|---|---|---|
+| Keys | **You must use your own two keys** | Works with only a user token |
+| Where requests go | **Only `www.worldanvil.com`** | By default, via the upstream author's proxy server |
+| Proxies | **Refused** (`WA_PROXY_URL` is an error) | Supported |
+| Published to npm | **No** (install from this repo) | Yes (`worldanvil-mcp`) |
+
+Nothing you read or write passes through any third-party server, and the server never uses anyone else's application key.
+
+## You need two keys
+
+World Anvil's API requires **both** of these on every request:
+
+1. **User API token** (`WA_AUTH_TOKEN`): says which account the request is for. Create one on your [User API Tokens](https://www.worldanvil.com/api/auth/key) page. Treat it like a password.
+2. **Application key** (`WA_APP_KEY`): says which app is making the request. Request your own from the same page using the **Application Key Form**. World Anvil currently issues application keys to **Grandmaster** members and above, and reviews each request by hand.
+
+The server refuses to start unless both are set.
+
+### Never share keys
+
+- **Do not share your application key** or use anyone else's. Each user of this fork needs their own. Running a shared key for other people turns you into a proxy operator, which is a grey area under World Anvil's API licence (non-commercial use, and no getting round membership-tier limits).
+- **Do not commit keys.** Keep them in your MCP client's config or a local `.env` file (gitignored). This repository contains no keys and never will.
+- If a token may have leaked, delete it on the User API Tokens page and create a new one.
 
 ## Installation
 
-### Claude Code
+Clone this repository and install dependencies:
 
 ```bash
-/install wlcarden/worldanvil-mcp
+git clone https://github.com/Carnivalius/worldanvil-mcp.git
+cd worldanvil-mcp/plugins/worldbuilding/worldanvil-mcp
+npm ci
 ```
 
-Then set your auth token:
-```bash
-export WA_AUTH_TOKEN="your-auth-token"
-```
-
-### Cursor / Windsurf / Other MCP Clients
-
-Add to your MCP configuration:
+Then point your MCP client at `index.js`. For example, in Claude Desktop's `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "worldanvil": {
-      "command": "npx",
-      "args": ["worldanvil-mcp"],
+      "command": "node",
+      "args": ["/absolute/path/to/worldanvil-mcp/plugins/worldbuilding/worldanvil-mcp/index.js"],
       "env": {
-        "WA_AUTH_TOKEN": "your-auth-token"
+        "WA_AUTH_TOKEN": "your-user-api-token",
+        "WA_APP_KEY": "your-own-application-key"
       }
     }
   }
 }
 ```
 
-### npm (Direct)
+**Do not use `npx worldanvil-mcp`.** That runs the upstream package from npm, not this fork.
 
-```bash
-npx worldanvil-mcp
-```
+More detail (tools, features, development and tests) is in [plugins/worldbuilding/worldanvil-mcp/README.md](plugins/worldbuilding/worldanvil-mcp/README.md).
 
-Or install globally:
-```bash
-npm install -g worldanvil-mcp
-```
+## World Anvil API licence
 
-## Setup
+World Anvil's API may not be used for any commercial project without their permission, and access can be withdrawn if an application breaks their Terms of Service or gets round membership-tier feature locks. See the [API documentation](https://www.worldanvil.com/api/external/boromir/documentation#licence-section). This fork is for personal, non-commercial use.
 
-1. Get your **Auth Token** from https://www.worldanvil.com/api/auth/key
-2. Configure your AI tool with the token (see installation above)
+## Licence
 
-That's it! The MCP uses a public proxy so you don't need an Application Key.
-
-## Features
-
-Full WorldAnvil API integration with 90+ tools:
-
-- **Articles** - Create, edit, and manage world articles (characters, locations, items, etc.)
-- **Categories** - Organize content with hierarchical categories
-- **Maps & Markers** - Manage interactive maps and location markers
-- **Timelines & Events** - Track historical events and eras
-- **Variables** - Reusable content snippets with BBCode support
-- **Secrets** - GM-only information hidden from players
-- **Notebooks & Notes** - Personal organization tools
-- **Manuscripts** - Long-form writing projects
-- **And more** - Blocks, canvases, subscriber groups, RPG systems
-
-## Documentation
-
-Once installed, Claude has access to comprehensive worldbuilding guidance:
-- Article templates and best practices
-- BBCode formatting reference
-- Content relationship patterns (@-mentions, hierarchies)
-- Campaign management workflows
-
-## Self-Hosting the Proxy
-
-If you prefer to use your own App Key, see `plugins/worldbuilding/worldanvil-mcp/cloudflare-worker/` for Cloudflare Worker deployment instructions.
-
-## Contributing
-
-Issues and PRs welcome! This plugin is maintained by the WorldAnvil community.
-
-## License
-
-MIT
+MIT. See [LICENSE](LICENSE). Original work © Leighton Carden; fork changes © Carnivalius.

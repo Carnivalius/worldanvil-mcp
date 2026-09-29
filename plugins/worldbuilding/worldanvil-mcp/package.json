@@ -1,7 +1,7 @@
 {
   "name": "worldanvil-mcp",
-  "version": "1.12.0",
-  "description": "MCP server for WorldAnvil API - works with Claude Code, Cursor, Windsurf, and any MCP-compatible AI tool",
+  "version": "1.12.0-fork.1",
+  "description": "World Anvil MCP server (independent fork): requires your own World Anvil application key and user token, talks only to World Anvil directly.",
   "main": "index.js",
   "bin": {
     "worldanvil-mcp": "index.js"
@@ -30,12 +30,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wlcarden/worldanvil-claude-plugin.git",
+    "url": "git+https://github.com/Carnivalius/worldanvil-mcp.git",
     "directory": "plugins/worldbuilding/worldanvil-mcp"
   },
-  "homepage": "https://github.com/wlcarden/worldanvil-claude-plugin#readme",
+  "homepage": "https://github.com/Carnivalius/worldanvil-mcp#readme",
   "bugs": {
-    "url": "https://github.com/wlcarden/worldanvil-claude-plugin/issues"
+    "url": "https://github.com/Carnivalius/worldanvil-mcp/issues"
   },
   "files": [
     "index.js",
@@ -44,7 +44,6 @@
     "README.md"
   ],
   "dependencies": {
-    "@crit-fumble/worldanvil": "^3.1.0",
     "@modelcontextprotocol/sdk": "^1.0.4"
   },
   "engines": {
@@ -53,5 +52,9 @@
   "devDependencies": {
     "dotenv": "^17.2.3",
     "vitest": "^4.0.16"
-  }
+  },
+  "private": true,
+  "contributors": [
+    "Carnivalius (fork maintainer)"
+  ]
 }

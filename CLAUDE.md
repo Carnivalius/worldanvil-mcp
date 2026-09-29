@@ -7,16 +7,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is a monorepo. The actual MCP server package lives at `plugins/worldbuilding/worldanvil-mcp/`. All development commands run from that subdirectory.
 
 ```
-plugins/worldbuilding/worldanvil-mcp/   ← main package (npm: worldanvil-mcp)
-  index.js                              ← entry point, starts stdio transport
+plugins/worldbuilding/worldanvil-mcp/   ← main package (independent fork, not published to npm)
+  index.js                              ← entry point, starts stdio transport (requires both keys)
   src/
     server.js                           ← MCP server factory
     tools.js                            ← tool schema definitions (90+ tools)
     handlers.js                         ← tool call dispatch (switch on tool name)
     api-client.js                       ← WorldAnvilClient HTTP wrapper
     utils.js                            ← Markdown→BBCode conversion
-  test/                                 ← vitest tests
-  cloudflare-worker/                    ← optional proxy deployment (Wrangler)
+  test/                                 ← vitest tests (offline)
+  test/live/harness/                    ← safety harness for live tests
   CLAUDE.md                             ← worldbuilding guidance for MCP users (not devs)
 ```
 
@@ -37,22 +37,19 @@ To run a single test file:
 npx vitest run test/utils.test.js
 ```
 
-Tests load credentials from `.env` in the package directory (use `dotenv`). Integration tests hit the real WorldAnvil API and require `WA_AUTH_TOKEN` to be set.
+`npm test` never touches the network. Live tests use `npm run test:live` via the safety harness (see below). Upstream's own integration tests additionally require `WA_RUN_UPSTREAM_LIVE_TESTS=1`.
 
 ## Environment Variables
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `WA_AUTH_TOKEN` | Always | User's WorldAnvil auth token |
-| `WA_APP_KEY` | Optional | Direct API mode; if omitted, uses default public proxy |
-| `WA_PROXY_URL` | Optional | Custom Cloudflare Worker proxy URL |
+| `WA_AUTH_TOKEN` | Always | User's own World Anvil user API token |
+| `WA_APP_KEY` | Always | User's own World Anvil application key (no proxy mode in this fork) |
 | `WA_TOOL_GROUPS` | Optional | Comma-separated tool groups or preset to load (default: all). Groups: core, content, images, campaign, maps, timeline, blocks, manuscripts, canvas, variables, social, rpg. Presets: all, standard, worldbuilding, writing, gamemaster |
 
 ## Architecture
 
-**Two API modes**, selected at startup:
-- **Direct mode**: `WA_APP_KEY` set → calls `www.worldanvil.com/api/external/boromir` with both `x-application-key` and `x-auth-token` headers
-- **Proxy mode**: no `WA_APP_KEY` → routes through a Cloudflare Worker that injects the app key; only `x-auth-token` is sent by the client
+**Direct mode only** (independent fork): the client always calls `www.worldanvil.com/api/external/boromir` with both `x-application-key` and `x-auth-token`. There is no proxy mode; `WA_PROXY_URL` is refused and the server exits unless both keys are set. Never add third-party hosts, proxies or shared keys.
 
 **Request flow**: `index.js` → `createServer()` in `server.js` → registers two MCP handlers (list tools, call tool) → `handleToolCall()` in `handlers.js` dispatches by tool name → `WorldAnvilClient` methods in `api-client.js`.
 
@@ -69,6 +66,6 @@ Tests load credentials from `.env` in the package directory (use `dotenv`). Inte
 - List endpoints use `POST` with a body (not `GET` with query params)
 - Rate limiting: space API calls ~750ms apart to avoid Cloudflare 429s
 
-## Cloudflare Worker Proxy
+## Live tests and safety
 
-`cloudflare-worker/` contains a Wrangler project for self-hosting the proxy. Deploy with `wrangler deploy` from that directory, then set the `WA_APP_KEY` Cloudflare secret. Users point `WA_PROXY_URL` at the deployed worker URL.
+`npm test` is offline only. Live tests (`npm run test:live`, `WA_TEST_STAGE=read|create|update|delete`) must go through the harness in `test/live/harness/`: it protects every pre-existing world and only allows touching `MCP-TEST-` items recorded in the gitignored ledger. Never weaken it, never commit `.env.test`, `test-ledger.json` or `protected-worlds.json`, and never put real world names, IDs or content in code, tests, commits or PRs.

@@ -1,60 +1,54 @@
-# World Anvil MCP Server
+# World Anvil MCP Server (independent fork)
 
-MCP (Model Context Protocol) server for integrating World Anvil with AI tools. Works with **Claude Code**, **Cursor**, **Windsurf**, **Cline**, and any MCP-compatible application.
+MCP (Model Context Protocol) server for working with **your own** World Anvil content from AI tools such as Claude Desktop, Claude Code, Open WebUI, Cursor and Cline.
 
-Provides 90+ tools for complete worldbuilding automation.
+This is an independent fork of [wlcarden/worldanvil-mcp](https://github.com/wlcarden/worldanvil-mcp): it requires your own keys, talks only to `www.worldanvil.com`, has no proxy mode, and is not published to npm. See the [repository README](../../../README.md) for how it differs from upstream.
+
+## You need two keys
+
+| Variable | What it is | Where to get it |
+|---|---|---|
+| `WA_AUTH_TOKEN` | Your **user API token** (which account) | [User API Tokens](https://www.worldanvil.com/api/auth/key) page, "Create new Token" |
+| `WA_APP_KEY` | Your **own application key** (which app) | Same page, "Application Key Form" (Grandmaster membership and above; reviewed by hand) |
+
+The server exits at start-up unless **both** are set, and exits if `WA_PROXY_URL` is set. Nothing is ever routed through a third party and no one else's application key is used.
+
+**Never share your keys** or use someone else's application key, and never commit keys to git. Each person using this fork needs their own application key.
 
 ## Installation
 
-### Via npm (Recommended)
-
 ```bash
-npx worldanvil-mcp
+git clone https://github.com/Carnivalius/worldanvil-mcp.git
+cd worldanvil-mcp/plugins/worldbuilding/worldanvil-mcp
+npm ci
 ```
 
-Or install globally:
-
-```bash
-npm install -g worldanvil-mcp
-worldanvil-mcp
-```
-
-### Via Claude Code Plugin
-
-```bash
-/install wlcarden/worldanvil-claude-plugin
-```
+Do **not** use `npx worldanvil-mcp`: that runs the upstream npm package, which falls back to a third-party proxy.
 
 ## Configuration
 
-### For Cursor / Windsurf / Other MCP Clients
-
-Add to your MCP configuration:
+Add to your MCP client configuration (Claude Desktop, Cursor, Windsurf, Cline, ...):
 
 ```json
 {
   "mcpServers": {
     "worldanvil": {
-      "command": "npx",
-      "args": ["worldanvil-mcp"],
+      "command": "node",
+      "args": ["/absolute/path/to/worldanvil-mcp/plugins/worldbuilding/worldanvil-mcp/index.js"],
       "env": {
-        "WA_AUTH_TOKEN": "your-auth-token"
+        "WA_AUTH_TOKEN": "your-user-api-token",
+        "WA_APP_KEY": "your-own-application-key"
       }
     }
   }
 }
 ```
 
-Get your Auth Token at: https://www.worldanvil.com/api/auth/key
+For the Claude Code plugin in this repository, set `WA_AUTH_TOKEN` and `WA_APP_KEY` in your environment; `.mcp.json` passes them through.
 
-That's it! The MCP uses a public proxy so you don't need an Application Key.
+### Optional: tool groups
 
-### For Claude Code
-
-After installing the plugin, just set:
-```bash
-export WA_AUTH_TOKEN="your-auth-token"
-```
+`WA_TOOL_GROUPS` limits which tools are loaded (default: all). Groups: core, content, images, campaign, maps, timeline, blocks, manuscripts, canvas, variables, social, rpg. Presets: all, standard, worldbuilding, writing, gamemaster.
 
 ## Features
 
@@ -87,105 +81,6 @@ export WA_AUTH_TOKEN="your-auth-token"
 - **Markdown to BBCode** - Automatic conversion for all content
 - **Images** - Browse uploaded images
 - **RPG Systems** - List available game systems
-
-## Quick Start
-
-### 1. Install Dependencies
-
-```bash
-npm install
-```
-
-### 2. Get API Credentials
-
-You need two authentication tokens from World Anvil:
-
-- **Application Key** (`WA_APP_KEY`): Request from World Anvil dev team
-- **User Auth Token** (`WA_AUTH_TOKEN`): Get from https://www.worldanvil.com/api/auth/key
-
-### 3. Configure in Claude Code
-
-Add to your MCP configuration (`~/.claude/settings.json` or equivalent):
-
-```json
-{
-  "mcpServers": {
-    "worldanvil": {
-      "command": "node",
-      "args": ["/path/to/worldanvil-mcp/index.js"],
-      "env": {
-        "WA_APP_KEY": "your-application-key",
-        "WA_AUTH_TOKEN": "your-auth-token"
-      }
-    }
-  }
-}
-```
-
-### 4. Restart Claude Code
-
-The World Anvil tools will now be available!
-
-## Proxy Mode (No App Key Required)
-
-Don't have an Application Key? **No problem!** The MCP includes a default public proxy.
-
-### Simplest Setup (Just Auth Token)
-
-```json
-{
-  "mcpServers": {
-    "worldanvil": {
-      "command": "node",
-      "args": ["/path/to/worldanvil-mcp/index.js"],
-      "env": {
-        "WA_AUTH_TOKEN": "your-auth-token"
-      }
-    }
-  }
-}
-```
-
-That's it! The MCP automatically routes through the default proxy at `worldanvil-proxy.wlcarden.workers.dev`.
-
-### Using a Custom Proxy
-
-If you prefer to use your own proxy:
-
-```json
-{
-  "mcpServers": {
-    "worldanvil": {
-      "command": "node",
-      "args": ["/path/to/worldanvil-mcp/index.js"],
-      "env": {
-        "WA_AUTH_TOKEN": "your-auth-token",
-        "WA_PROXY_URL": "https://your-proxy.workers.dev"
-      }
-    }
-  }
-}
-```
-
-### For Proxy Operators (Sharing Your App Key)
-
-If you have an App Key and want to let others use the MCP:
-
-1. Deploy the Cloudflare Worker from `cloudflare-worker/`
-2. Add your App Key as a secret
-3. Share the Worker URL with users
-
-See [cloudflare-worker/README.md](./cloudflare-worker/README.md) for detailed setup instructions.
-
-### Mode Priority
-
-The MCP chooses its mode based on what's configured:
-
-| WA_APP_KEY | WA_PROXY_URL | Mode |
-|------------|--------------|------|
-| Set | Any | Direct (App Key used, proxy ignored) |
-| Not set | Set | Custom Proxy (routes through your Worker) |
-| Not set | Not set | Default Proxy (routes through `worldanvil-proxy.wlcarden.workers.dev`) |
 
 ## Available Tools
 
@@ -547,24 +442,20 @@ worldanvil-mcp/
 ### Running Tests
 
 ```bash
-npm test              # Run all tests (API tests skipped without credentials)
+npm test              # Offline tests only (no network, no credentials)
 npm run test:watch    # Watch mode
 npm run test:coverage # With coverage
-
-# Run with real API integration tests:
-WA_APP_KEY=xxx WA_AUTH_TOKEN=xxx npm test
-
-# Use a specific test world (optional):
-WA_TEST_WORLD_ID=xxx WA_APP_KEY=xxx WA_AUTH_TOKEN=xxx npm test
 ```
 
-**Test World Strategy:**
-- Tests look for an existing world with `[TEST]` prefix and reuse it
-- If none exists, creates `[TEST] MCP Integration`
-- The test world is preserved between runs (API doesn't allow world deletion)
-- Set `WA_TEST_WORLD_ID` to use a specific world instead
+Live tests against a real account go through a safety harness (`test/live/harness/`) and only run on request, in supervised stages:
 
-**Warning:** Worlds with `[TEST]` prefix may be modified during tests - don't store important content in them!
+```bash
+WA_TEST_STAGE=read npm run test:live      # then create, update, delete
+```
+
+The harness reads both keys from a gitignored `.env.test`, refuses proxies, protects every pre-existing world (hard-coded fingerprints plus a first-run snapshot), and only lets tests read, change or delete items they created themselves (named `MCP-TEST-...` and recorded in a gitignored ledger).
+
+The upstream integration tests in `test/api.test.js` and `test/timeline.test.js` write to a real account and are disabled unless `WA_RUN_UPSTREAM_LIVE_TESTS=1` is also set. Don't run them against an account with content you care about.
 
 ### Local Development
 
@@ -579,7 +470,16 @@ npm run dev           # Run with file watching
 
 ## Changelog
 
-### v1.9.0
+### v1.12.0-fork.1 (independent fork)
+- **Your own keys only**: `WA_APP_KEY` and `WA_AUTH_TOKEN` are both required
+- **No proxies**: default public proxy removed; `WA_PROXY_URL` is refused
+- Requests go only to `www.worldanvil.com`, with a User-Agent naming this fork (World Anvil API requirement)
+- Removed the Cloudflare Worker proxy template and the unused `@crit-fumble/worldanvil` dependency
+- Removed the npm publish workflow (this fork is not published to npm); CI runs offline tests only
+- Added a safety harness for live tests; upstream live tests now need an explicit opt-in
+
+
+### v1.9.0 (upstream; proxy mode was removed in this fork)
 - **Proxy Mode** - Use MCP without your own Application Key
 - **Default public proxy** - Just set `WA_AUTH_TOKEN` and it works!
 - Cloudflare Worker template for running your own proxy

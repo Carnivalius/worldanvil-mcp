@@ -5,78 +5,57 @@
  */
 
 import https from "https";
+import { createRequire } from "module";
 
-// Configuration defaults
-const DEFAULT_API_BASE = "www.worldanvil.com";
-const DEFAULT_API_PATH = "/api/external/boromir";
-const DEFAULT_PROXY_URL = "https://worldanvil-proxy.onrender.com";
+const { version: PKG_VERSION } = createRequire(import.meta.url)(
+  "../package.json",
+);
+
+// The ONLY host this client ever talks to. There is no proxy mode: every
+// user must supply their own World Anvil application key and user token.
+export const API_HOST = "www.worldanvil.com";
+export const API_PATH = "/api/external/boromir";
+
+// World Anvil requires a User-Agent with the app name, URL and version.
+export const USER_AGENT = `worldanvil-mcp-fork (https://github.com/Carnivalius/worldanvil-mcp, ${PKG_VERSION})`;
 
 /**
  * World Anvil API Client
  *
- * Provides methods for all World Anvil Boromir API endpoints.
- * Supports two modes:
- *   - Direct mode: Uses appKey + authToken to call WorldAnvil directly
- *   - Proxy mode: Uses proxyUrl + authToken, proxy injects appKey
+ * Provides methods for all World Anvil Boromir API endpoints. Calls World
+ * Anvil directly using the caller's own application key and user token.
  */
 export class WorldAnvilClient {
   /**
    * Create a new World Anvil API client
    *
    * @param {Object} config - Client configuration
-   * @param {string} [config.appKey] - World Anvil Application Key (optional if using proxyUrl)
-   * @param {string} config.authToken - World Anvil User Authentication Token (always required)
-   * @param {string} [config.proxyUrl] - Cloudflare Worker proxy URL (optional, used if appKey not provided)
-   * @param {string} [config.apiBase] - API hostname (default: www.worldanvil.com, auto-set in proxy mode)
-   * @param {string} [config.apiPath] - API path prefix (default: /api/external/boromir, empty in proxy mode)
+   * @param {string} config.appKey - Your own World Anvil Application Key (required)
+   * @param {string} config.authToken - Your World Anvil User Authentication Token (required)
    */
   constructor(config = {}) {
+    if (config.proxyUrl || process.env.WA_PROXY_URL) {
+      throw new Error(
+        "Proxies are not supported: this server only talks to World Anvil directly " +
+          "with your own application key. Remove WA_PROXY_URL.",
+      );
+    }
+
     this.authToken = config.authToken || process.env.WA_AUTH_TOKEN;
+    this.appKey = config.appKey || process.env.WA_APP_KEY;
 
-    // Check for authToken first - always required
     if (!this.authToken) {
-      throw new Error("WA_AUTH_TOKEN is required");
+      throw new Error("WA_AUTH_TOKEN is required (your World Anvil user token)");
+    }
+    if (!this.appKey) {
+      throw new Error(
+        "WA_APP_KEY is required (your own World Anvil application key). " +
+          "This server never uses anyone else's key.",
+      );
     }
 
-    // Determine mode: direct (with appKey) or proxy (with proxyUrl)
-    const appKey = config.appKey || process.env.WA_APP_KEY;
-    const proxyUrl = config.proxyUrl || process.env.WA_PROXY_URL;
-
-    if (appKey) {
-      // Direct mode - use appKey, ignore proxyUrl if both provided
-      this.appKey = appKey;
-      this.proxyUrl = undefined;
-      this.apiBase = config.apiBase || DEFAULT_API_BASE;
-      this.apiPath = config.apiPath || DEFAULT_API_PATH;
-    } else if (proxyUrl) {
-      // Proxy mode - parse proxyUrl, proxy will inject appKey
-      this.appKey = undefined;
-      // Normalize URL: strip trailing slash
-      const normalizedUrl = proxyUrl.replace(/\/$/, "");
-      this.proxyUrl = normalizedUrl;
-
-      // Parse proxy URL to extract hostname
-      try {
-        const parsed = new URL(normalizedUrl);
-        this.apiBase = parsed.hostname;
-        // Proxy handles the /api/external/boromir path prefix
-        this.apiPath = "";
-        // Store protocol for request (http vs https)
-        this.useHttps = parsed.protocol === "https:";
-      } catch (e) {
-        throw new Error(`Invalid WA_PROXY_URL: ${proxyUrl}`);
-      }
-    } else {
-      // Neither appKey nor custom proxyUrl - use default proxy
-      this.appKey = undefined;
-      this.proxyUrl = DEFAULT_PROXY_URL;
-
-      // Parse default proxy URL
-      const parsed = new URL(DEFAULT_PROXY_URL);
-      this.apiBase = parsed.hostname;
-      this.apiPath = "";
-      this.useHttps = parsed.protocol === "https:";
-    }
+    this.apiBase = API_HOST;
+    this.apiPath = API_PATH;
   }
 
   /**
@@ -91,17 +70,12 @@ export class WorldAnvilClient {
     return new Promise((resolve, reject) => {
       const postData = body ? JSON.stringify(body) : "";
 
-      // Build headers - only include x-application-key in direct mode
       const headers = {
         "x-auth-token": this.authToken,
+        "x-application-key": this.appKey,
         Accept: "application/json",
-        "User-Agent": "WorldAnvil-MCP/1.0",
+        "User-Agent": USER_AGENT,
       };
-
-      // Only add app key header in direct mode (proxy injects it)
-      if (this.appKey) {
-        headers["x-application-key"] = this.appKey;
-      }
 
       const options = {
         hostname: this.apiBase,

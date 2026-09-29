@@ -1,10 +1,10 @@
 {
   "name": "worldbuilding",
   "version": "1.0.0",
-  "description": "Worldbuilding tools including World Anvil API integration for managing campaigns, articles, maps, and timelines",
+  "description": "World Anvil API integration (independent fork). Requires your own World Anvil application key and user token; talks only to World Anvil.",
   "author": {
-    "name": "Leighton Carden",
-    "url": "https://github.com/wlcarden"
+    "name": "Carnivalius (fork of wlcarden/worldanvil-mcp)",
+    "url": "https://github.com/Carnivalius/worldanvil-mcp"
   },
   "keywords": [
     "worldbuilding",
