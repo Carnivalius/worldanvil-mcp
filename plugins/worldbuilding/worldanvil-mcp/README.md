@@ -1,4 +1,6 @@
-# World Anvil MCP Server (independent fork)
+> ⚠️ **Work in progress: please don't use this yet.** This fork hasn't yet been tested against a real World Anvil account and could change or delete content in ways it shouldn't. See the [repository README](../../../README.md).
+
+# World Anvil MCP Server (writer-focused fork)
 
 MCP (Model Context Protocol) server for working with **your own** World Anvil content from AI tools such as Claude Desktop, Claude Code, Open WebUI, Cursor and Cline.
 
@@ -475,6 +477,7 @@ npm run dev           # Run with file watching
 ## Changelog
 
 ### v1.12.0-fork.1 (independent fork)
+- **Work in progress:** the server refuses to start unless `WA_I_ACCEPT_UNTESTED=1` (removed at first release)
 - **World access settings**: per-world full_edit / edit_only / read_only / blocked, allow-only mode, default level, create/delete-world switches (see repository README)
 - **Local backups** before every edit or delete (read-only, rotated); no backup, no change
 - Account, image, subscriber-group and world-rename tools removed; hidden tools can't be called directly

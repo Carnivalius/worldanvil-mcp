@@ -29,6 +29,18 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "./src/server.js";
 
+// Development lock: this fork hasn't been tested against a real account yet.
+// Remove at the first release.
+if (process.env.WA_I_ACCEPT_UNTESTED !== "1") {
+  console.error(
+    "Error: this World Anvil MCP fork is a work in progress and hasn't been tested\n" +
+      "against a real World Anvil account yet. It could change or delete content in\n" +
+      "ways it shouldn't, so it won't start. Please wait for the first release.\n" +
+      "(Testers only: set WA_I_ACCEPT_UNTESTED=1 to start it anyway.)",
+  );
+  process.exit(1);
+}
+
 // Validate environment variables: both of YOUR keys are required, and no
 // proxy is allowed, so requests only ever go to World Anvil itself.
 const APP_KEY = process.env.WA_APP_KEY;

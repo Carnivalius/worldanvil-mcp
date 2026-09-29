@@ -45,6 +45,7 @@ npx vitest run test/utils.test.js
 |---|---|---|
 | `WA_AUTH_TOKEN` | Always | User's own World Anvil user API token |
 | `WA_APP_KEY` | Always | User's own World Anvil application key (no proxy mode in this fork) |
+| `WA_I_ACCEPT_UNTESTED` | Dev only | Must be `1` for index.js to start while the fork is untested (lock removed at first release) |
 | `WA_ACCESS_FILE` | Optional | Path to the world access settings (default `~/.worldanvil-mcp/access.json`; must exist if set) |
 | `WA_TOOL_GROUPS` | Optional | Comma-separated tool groups or preset to load (default: all). Groups: core, content, images, campaign, maps, timeline, blocks, manuscripts, canvas, variables, social, rpg. Presets: all, standard, worldbuilding, writing, gamemaster |
 

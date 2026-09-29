@@ -1,22 +1,47 @@
-# World Anvil MCP (independent fork)
+> ⚠️ **Work in progress: please don't use this yet.**
+> This fork is still being built and hasn't yet been tested against a real World Anvil account. Until testing is finished, it could change or delete content in ways it shouldn't. Please wait for the first release before connecting it to worlds you care about. If you want a working World Anvil MCP today, the original [worldanvil-mcp](https://github.com/wlcarden/worldanvil-mcp) is available.
 
-An MCP server that lets your AI tools (Claude Desktop, Claude Code, Open WebUI and other MCP clients) work with **your own** [World Anvil](https://www.worldanvil.com/) worlds, articles and manuscripts.
+# World Anvil MCP: a writer-focused fork
 
-This is an independent fork of [wlcarden/worldanvil-mcp](https://github.com/wlcarden/worldanvil-mcp). It is maintained separately, with a different approach, and is not intended to be merged back.
+An MCP server that connects AI assistants (Claude Desktop, Claude Code, Open WebUI and other MCP clients) to your own [World Anvil](https://www.worldanvil.com/) worlds, so they can help with the work *around* your writing: keeping track of lore, spotting contradictions, and supporting the editorial process.
 
-## How this fork differs
+## Who it's for
 
-| | This fork | Upstream |
-|---|---|---|
-| Keys | **You must use your own two keys** | Works with only a user token |
-| Where requests go | **Only `www.worldanvil.com`** | By default, via the upstream author's proxy server |
-| Proxies | **Refused** (`WA_PROXY_URL` is an error) | Supported |
-| Published to npm | **No** (install from this repo) | Yes (`worldanvil-mcp`) |
-| Per-world control | **Full edit / edit only / read only / blocked, per world** | Everything your token can reach |
-| Backups | **Automatic local copy before every edit or delete** | None |
-| Account, image, subscriber-group tools | **Not offered** | Offered |
+It's built for writers who write their own stories and want an assistant to:
 
-Nothing you read or write passes through any third-party server, and the server never uses anyone else's application key.
+- **keep track of lore:** find what you've already established about a place, person or event;
+- **spot conflicts:** check a new chapter or article against your existing notes;
+- **help with editing and organising:** file chapters into manuscripts in the right order, tidy articles, suggest links between them.
+
+It isn't designed for having AI write your main prose, and its tools lean the other way: chapter text is stored exactly as you wrote it.
+
+## Why this fork exists
+
+This project builds on [worldanvil-mcp](https://github.com/wlcarden/worldanvil-mcp) by Leighton Carden. We've used and loved his tool, which did the hard work of connecting AI to World Anvil in the first place, and this fork wouldn't exist without it. Thank you.
+
+What this fork adds comes from a very ordinary fear: losing work. After many hours of writing, having something deleted or overwritten with no way back is soul-destroying. So this fork adds a layer of care and responsibility:
+
+- **You decide what the AI can touch.** Each world can be full edit, edit only (no deleting), read only, or completely off-limits, so private or finished work stays exactly as you left it.
+- **Mistakes can be undone.** Before anything is changed or deleted, a copy is saved on your own computer.
+- **Your writing goes straight to World Anvil.** Requests go directly to World Anvil with your own keys, with nothing in between.
+- **It plays by World Anvil's rules.** Your own application key, clear identification of the app, personal and non-commercial use, and nothing that sidesteps membership tiers.
+
+These choices change how the tool works quite fundamentally, so this is maintained as a separate project rather than as changes to the original. Both have their place.
+
+### What the safety features are, and aren't
+
+Access levels and backups are a **safety net for honest mistakes**: an AI misreading an instruction, an edit landing on the wrong article, a chapter overwritten by accident. They're there so an accident is unlikely, and if one happens, you can get your work back.
+
+They are **not a security barrier** against a person or program deliberately trying to cause harm. Anyone with access to your computer could change the settings. That risk is managed by the keys: the tool only works with **your own** World Anvil user token and **your own** application key, so keep both private.
+
+## At a glance
+
+- **Your own two keys** (user token and application key) are required; the server won't start without both.
+- **Direct to World Anvil only:** no proxies, no third-party servers.
+- **Per-world access levels:** full edit, edit only, read only or blocked (see [World access settings](#world-access-settings)).
+- **Automatic local backups** before every edit or delete.
+- **A focused toolset:** no account, image-library or subscriber-group tools.
+- **Not published to npm:** install from this repository.
 
 ## You need two keys
 
@@ -60,7 +85,9 @@ Then point your MCP client at `index.js`. For example, in Claude Desktop's `clau
 }
 ```
 
-**Do not use `npx worldanvil-mcp`.** That runs the upstream package from npm, not this fork.
+**Do not use `npx worldanvil-mcp`.** That runs the original package from npm, not this fork.
+
+**During development** the server refuses to start unless `WA_I_ACCEPT_UNTESTED=1` is set, and prints a warning. Please don't set it unless you are helping to test. This lock will be removed at the first release.
 
 More detail (tools, features, development and tests) is in [plugins/worldbuilding/worldanvil-mcp/README.md](plugins/worldbuilding/worldanvil-mcp/README.md).
 
