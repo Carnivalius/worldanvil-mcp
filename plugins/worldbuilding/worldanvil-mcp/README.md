@@ -46,6 +46,10 @@ Add to your MCP client configuration (Claude Desktop, Cursor, Windsurf, Cline, .
 
 For the Claude Code plugin in this repository, set `WA_AUTH_TOKEN` and `WA_APP_KEY` in your environment; `.mcp.json` passes them through.
 
+### World access settings
+
+What the tool may do in each world (full edit, edit only, read only or blocked), automatic backups before every edit or delete, and the start-up checks are all set in `~/.worldanvil-mcp/access.json` (or `WA_ACCESS_FILE`). A starter file is created on first run. See [World access settings](../../../README.md#world-access-settings) in the repository README.
+
 ### Optional: tool groups
 
 `WA_TOOL_GROUPS` limits which tools are loaded (default: all). Groups: core, content, images, campaign, maps, timeline, blocks, manuscripts, canvas, variables, social, rpg. Presets: all, standard, worldbuilding, writing, gamemaster.
@@ -471,6 +475,10 @@ npm run dev           # Run with file watching
 ## Changelog
 
 ### v1.12.0-fork.1 (independent fork)
+- **World access settings**: per-world full_edit / edit_only / read_only / blocked, allow-only mode, default level, create/delete-world switches (see repository README)
+- **Local backups** before every edit or delete (read-only, rotated); no backup, no change
+- Account, image, subscriber-group and world-rename tools removed; hidden tools can't be called directly
+- Request ids validated (no smuggled ids), cross-world links refused, article `fields` restricted to template values
 - **Your own keys only**: `WA_APP_KEY` and `WA_AUTH_TOKEN` are both required
 - **No proxies**: default public proxy removed; `WA_PROXY_URL` is refused
 - Requests go only to `www.worldanvil.com`, with a User-Agent naming this fork (World Anvil API requirement)
