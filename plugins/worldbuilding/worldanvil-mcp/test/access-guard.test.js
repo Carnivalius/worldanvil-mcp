@@ -204,6 +204,26 @@ describe("fail closed", () => {
   });
 });
 
+describe("world lookups", () => {
+  // Live World Anvil only includes a category's `world` at granularity=2.
+  function lowDetailWithoutWorld(endpoint, method, body) {
+    if (endpoint.startsWith("/category?") && !endpoint.includes("granularity=2")) {
+      calls.push({ endpoint, method, body });
+      return Promise.resolve({ id: I.category, title: "no world at low detail" });
+    }
+    return fakeSend(endpoint, method, body);
+  }
+
+  it("asks for full detail, where World Anvil includes the item's world", async () => {
+    const a = makeAccess({ allow_only: true, world_list: { "My Epic Saga": "full_edit" } });
+    a.send = lowDetailWithoutWorld;
+    await a.check(`/category?id=${I.category}&granularity=2`, "GET");
+    await a.check("/article", "PUT", { title: "x", world: { id: W.saga }, category: { id: I.category } });
+    const lookups = calls.filter((c) => c.endpoint.startsWith(`/category?id=${I.category}`));
+    expect(lookups.map((c) => c.endpoint)).toEqual([`/category?id=${I.category}&granularity=2`]);
+  });
+});
+
 // ---- worlds and disabled endpoints ----------------------------------------------
 describe("world-level rules", () => {
   it("creating worlds follows allow_create_worlds", async () => {

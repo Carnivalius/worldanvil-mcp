@@ -24,12 +24,13 @@ let failBackupRead;
 
 function fakeSend(endpoint, method = "GET") {
   calls.push({ endpoint, method });
-  const [path, q = ""] = endpoint.split("?");
-  const params = new URLSearchParams(q);
+  const [path] = endpoint.split("?");
   if (path === "/identity") return Promise.resolve({ id: USER });
   if (path === "/user/worlds") return Promise.resolve({ entities: [{ id: WORLD, title: "My Epic Saga" }] });
   if (path === "/article" && method === "GET") {
-    if (failBackupRead && params.get("granularity") === "2") return Promise.reject(new Error("timeout"));
+    // The guard's world lookup reads the article first; fail the backup read after it.
+    const reads = calls.filter((c) => c.endpoint.startsWith("/article?") && c.method === "GET");
+    if (failBackupRead && reads.length > 1) return Promise.reject(new Error("timeout"));
     return Promise.resolve(article);
   }
   return Promise.resolve({ success: true });

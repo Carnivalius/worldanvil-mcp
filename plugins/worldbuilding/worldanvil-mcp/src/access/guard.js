@@ -246,7 +246,9 @@ export class WorldAccess {
     const key = `${path}:${String(id).toLowerCase()}`;
     if (this.worldCache.has(key)) return this.worldCache.get(key);
     if (depth > 5) throw new AccessError("item nesting too deep to check");
-    const item = await this.send(`${path}?id=${id}&granularity=1`, "GET");
+    // Full detail: at granularity=1 World Anvil leaves `world` out of some
+    // items (categories, found live 2026-10-15).
+    const item = await this.send(`${path}?id=${id}&granularity=2`, "GET");
     let world = null;
     if (item?.world?.id) world = String(item.world.id).toLowerCase();
     else
