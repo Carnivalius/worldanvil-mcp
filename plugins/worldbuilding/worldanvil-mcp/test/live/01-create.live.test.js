@@ -25,6 +25,7 @@ const TITLES = {
   manuscript: "MCP-TEST-Manuscript",
   version: "MCP-TEST-Draft",
   part: "MCP-TEST-Chapter 1",
+  beat: "MCP-TEST-Beat",
 };
 
 const VISIBILITY_FIELDS = /public|private|visib|publish|state|draft|locked/i;
@@ -168,16 +169,28 @@ describe.runIf(stage === "create")("stage 2: create (test world only)", () => {
   });
 
   it("creates a chapter in the version and reads it back", async () => {
-    // The handover suspects this needs `version` + `type` rather than
-    // `manuscriptVersion`; if so, World Anvil's error shows up here.
+    // Sends `type` (default "manuscript") and `version`; a part has no text.
     ids.part = await reuseOrCreate("/manuscript_part", "worldanvil_create_manuscriptpart", {
       title: TITLES.part,
       version_id: ids.version,
-      content: "The first line of **chapter one**.",
     });
     const part = await read("worldanvil_get_manuscriptpart", { part_id: ids.part });
     expect(part.title).toBe(TITLES.part);
-    note(`chapter content as stored: ${JSON.stringify(part.content)}`);
+    note(`chapter type as stored: ${JSON.stringify(part.type)}`);
     note(`chapter fields: ${Object.keys(part).sort().join(", ")}`);
+  });
+
+  it("adds a beat (the chapter's text) and reads it back", async () => {
+    // `title` is not a documented beat field; it is sent so the harness's
+    // MCP-TEST- rule can track the beat, and the read-back shows if it's kept.
+    ids.beat = await reuseOrCreate("/manuscript_beat", "worldanvil_create_manuscriptbeat", {
+      title: TITLES.beat,
+      part_id: ids.part,
+      content: "The first line of **chapter one**.",
+    });
+    const beat = await read("worldanvil_get_manuscriptbeat", { beat_id: ids.beat });
+    note(`beat content as stored: ${JSON.stringify(beat.content)}`);
+    note(`beat title as stored: ${JSON.stringify(beat.title ?? null)}`);
+    note(`beat fields: ${Object.keys(beat).sort().join(", ")}`);
   });
 });
