@@ -1104,15 +1104,15 @@ export async function handleToolCall(name, args, client) {
           }),
         );
 
-      case "worldanvil_create_manuscriptpart": {
-        const data = {
-          title: args.title,
-          manuscriptVersion: { id: args.version_id },
-        };
-        if (args.content !== undefined)
-          data.content = markdownToBBCode(args.content);
-        return jsonResponse(await client.createManuscriptPart(data));
-      }
+      case "worldanvil_create_manuscriptpart":
+        // World Anvil requires `type` and `version`; a part has no text field.
+        return jsonResponse(
+          await client.createManuscriptPart({
+            title: args.title,
+            type: args.type ?? "manuscript",
+            version: { id: args.version_id },
+          }),
+        );
 
       case "worldanvil_update_manuscriptpart": {
         const data = {};
@@ -1140,12 +1140,12 @@ export async function handleToolCall(name, args, client) {
         );
 
       case "worldanvil_create_manuscriptbeat": {
+        // World Anvil requires `content` and `part`.
         const data = {
-          title: args.title,
-          manuscriptPart: { id: args.part_id },
+          content: markdownToBBCode(args.content),
+          part: { id: args.part_id },
         };
-        if (args.content !== undefined)
-          data.content = markdownToBBCode(args.content);
+        if (args.title !== undefined) data.title = args.title;
         return jsonResponse(await client.createManuscriptBeat(data));
       }
 

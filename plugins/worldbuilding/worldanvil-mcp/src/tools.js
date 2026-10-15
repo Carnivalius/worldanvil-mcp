@@ -2243,7 +2243,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_create_manuscriptpart",
       description:
-        "Create a new part (chapter/section) in a manuscript version. Content supports Markdown (auto-converted to BBCode).",
+        "Create a new part (page or chapter) in a manuscript version. A part holds no text itself: add the writing with worldanvil_create_manuscriptbeat.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2252,9 +2252,10 @@ export function getToolDefinitions() {
             type: "string",
             description: "Parent manuscript version ID",
           },
-          content: {
+          type: {
             type: "string",
-            description: "Chapter content (Markdown auto-converted to BBCode)",
+            description:
+              'Part type (default "manuscript", a text page; the only value World Anvil documents)',
           },
         },
         required: ["title", "version_id"],
@@ -2317,11 +2318,10 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_create_manuscriptbeat",
       description:
-        "Create a new beat (scene outline) in a manuscript part. Content supports Markdown.",
+        "Create a new beat in a manuscript part. Beats hold the part's text. Content supports Markdown.",
       inputSchema: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Beat/scene title" },
           part_id: {
             type: "string",
             description: "Parent manuscript part ID",
@@ -2330,8 +2330,12 @@ export function getToolDefinitions() {
             type: "string",
             description: "Beat content (Markdown auto-converted to BBCode)",
           },
+          title: {
+            type: "string",
+            description: "Beat title (optional; not in World Anvil's documented fields)",
+          },
         },
-        required: ["title", "part_id"],
+        required: ["part_id", "content"],
       },
     },
     {

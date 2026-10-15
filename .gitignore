@@ -16,6 +16,9 @@ test-access.json
 test-access.json.*
 test-backups
 
+# Local API field guide (findings from live use; kept out of the repo)
+WORLD_ANVIL_API_GUIDE.md
+
 # IDE
 .vscode/
 .idea/

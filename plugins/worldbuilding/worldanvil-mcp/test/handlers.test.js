@@ -27,6 +27,8 @@ function makeMockClient(overrides = {}) {
     updateCanvas: stub("updateCanvas"),
     createMarker: stub("createMarker"),
     updateMarker: stub("updateMarker"),
+    createManuscriptPart: stub("createManuscriptPart"),
+    createManuscriptBeat: stub("createManuscriptBeat"),
     ...overrides,
   };
 }
@@ -160,6 +162,77 @@ describe("Category handlers", () => {
 // ---------------------------------------------------------------------------
 // Article handlers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Manuscript part and beat handlers (field names from World Anvil's spec;
+// the missing `type` was confirmed live 2026-10-15)
+// ---------------------------------------------------------------------------
+
+describe("Manuscript part and beat handlers", () => {
+  let client;
+
+  beforeEach(() => {
+    client = makeMockClient();
+  });
+
+  describe("worldanvil_create_manuscriptpart", () => {
+    it("sends type and version, defaulting type to manuscript", async () => {
+      await handleToolCall(
+        "worldanvil_create_manuscriptpart",
+        { title: "Chapter 1", version_id: "version-1" },
+        client,
+      );
+
+      const [payload] = client.createManuscriptPart.mock.calls[0];
+      expect(payload).toEqual({
+        title: "Chapter 1",
+        type: "manuscript",
+        version: { id: "version-1" },
+      });
+    });
+
+    it("passes an explicit type through and never sends content", async () => {
+      await handleToolCall(
+        "worldanvil_create_manuscriptpart",
+        { title: "Act 1", version_id: "version-1", type: "folder", content: "ignored" },
+        client,
+      );
+
+      const [payload] = client.createManuscriptPart.mock.calls[0];
+      expect(payload.type).toBe("folder");
+      expect(payload).not.toHaveProperty("content");
+      expect(payload).not.toHaveProperty("manuscriptVersion");
+    });
+  });
+
+  describe("worldanvil_create_manuscriptbeat", () => {
+    it("sends content as BBCode and the part as `part`", async () => {
+      await handleToolCall(
+        "worldanvil_create_manuscriptbeat",
+        { part_id: "part-1", content: "It was a **dark** night." },
+        client,
+      );
+
+      const [payload] = client.createManuscriptBeat.mock.calls[0];
+      expect(payload).toEqual({
+        content: "It was a [b]dark[/b] night.",
+        part: { id: "part-1" },
+      });
+    });
+
+    it("includes a title only when given", async () => {
+      await handleToolCall(
+        "worldanvil_create_manuscriptbeat",
+        { part_id: "part-1", content: "x", title: "Opening" },
+        client,
+      );
+
+      const [payload] = client.createManuscriptBeat.mock.calls[0];
+      expect(payload.title).toBe("Opening");
+      expect(payload).not.toHaveProperty("manuscriptPart");
+    });
+  });
+});
 
 describe("Article handlers", () => {
   let client;
