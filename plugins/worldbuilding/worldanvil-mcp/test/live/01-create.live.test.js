@@ -62,7 +62,11 @@ describe.runIf(stage === "create")("stage 2: create (test world only)", () => {
     return String(id);
   }
 
-  /** A live ledger item from an earlier run, or a newly created one. */
+  /**
+   * A live ledger item from an earlier run, or a newly created one. Read-back
+   * checks test the MCP-TEST- prefix only: stage 3 renames items, and World
+   * Anvil may change titles on save (it strips brackets from manuscripts').
+   */
   async function reuseOrCreate(path, tool, args) {
     const earlier = h.ledger.live().find((e) => e.path === path && e.title === args.title);
     if (earlier) {
@@ -102,7 +106,7 @@ describe.runIf(stage === "create")("stage 2: create (test world only)", () => {
       world_id: ids.world,
     });
     const category = await read("worldanvil_get_category", { category_id: ids.category });
-    expect(category.title).toBe(TITLES.category);
+    expect(category.title).toMatch(/^MCP-TEST-/);
   });
 
   it("creates an article in the category and reads it back", async () => {
@@ -114,7 +118,7 @@ describe.runIf(stage === "create")("stage 2: create (test world only)", () => {
       content: "A **bold** start and an *italic* finish.",
     });
     const article = await read("worldanvil_get_article", { article_id: ids.article });
-    expect(article.title).toBe(TITLES.article);
+    expect(article.title).toMatch(/^MCP-TEST-/);
     note(`article content as stored: ${JSON.stringify(article.content)}`);
     note(`article category matches: ${article.category?.id === ids.category}`);
     note(`article visibility fields: ${describeFields(article, VISIBILITY_FIELDS)}`);
@@ -140,7 +144,7 @@ describe.runIf(stage === "create")("stage 2: create (test world only)", () => {
     const manuscript = await read("worldanvil_get_manuscript", {
       manuscript_id: ids.manuscript,
     });
-    expect(manuscript.title).toBe(TITLES.manuscript);
+    expect(manuscript.title).toMatch(/^MCP-TEST-/);
   });
 
   it("has a manuscript version (adopts World Anvil's default, or makes one)", async () => {
@@ -177,7 +181,7 @@ describe.runIf(stage === "create")("stage 2: create (test world only)", () => {
       version_id: ids.version,
     });
     const part = await read("worldanvil_get_manuscriptpart", { part_id: ids.part });
-    expect(part.title).toBe(TITLES.part);
+    expect(part.title).toMatch(/^MCP-TEST-/);
     note(`chapter type as stored: ${JSON.stringify(part.type)}`);
     note(`chapter fields: ${Object.keys(part).sort().join(", ")}`);
   });
@@ -202,7 +206,7 @@ describe.runIf(stage === "create")("stage 2: create (test world only)", () => {
       version_id: ids.version,
     });
     const plot = await read("worldanvil_get_manuscriptplot", { plot_id: ids.plot });
-    expect(plot.title).toBe(TITLES.plot);
+    expect(plot.title).toMatch(/^MCP-TEST-/);
     note(`plot fields: ${Object.keys(plot).sort().join(", ")}`);
   });
 
