@@ -33,7 +33,9 @@ describe.runIf(stage === "read")("stage 1: pre-flight (read only)", () => {
     expect(res.text).toMatch(/REFUSED/);
   });
 
-  it.runIf(() => !!h?.testWorldId)("can read the test world if it exists", async () => {
+  // runIf is decided before beforeAll runs, so skip from inside the test.
+  it("can read the test world if it exists", async ({ skip }) => {
+    if (!h.testWorldId) skip("no test world yet (made in the create stage)");
     const res = await h.call("worldanvil_get_world", { world_id: h.testWorldId });
     expect(res.isError).toBe(false);
     expect(String(res.data.title)).toMatch(/^MCP-TEST-/);
