@@ -26,6 +26,8 @@ const TITLES = {
   version: "MCP-TEST-Draft",
   part: "MCP-TEST-Chapter 1",
   beat: "MCP-TEST-Beat",
+  plot: "MCP-TEST-Plot",
+  stat: "MCP-TEST-Stat",
 };
 
 const VISIBILITY_FIELDS = /public|private|visib|publish|state|draft|locked/i;
@@ -192,5 +194,29 @@ describe.runIf(stage === "create")("stage 2: create (test world only)", () => {
     note(`beat content as stored: ${JSON.stringify(beat.content)}`);
     note(`beat title as stored: ${JSON.stringify(beat.title ?? null)}`);
     note(`beat fields: ${Object.keys(beat).sort().join(", ")}`);
+  });
+
+  it("creates a plot thread in the version and reads it back", async () => {
+    ids.plot = await reuseOrCreate("/manuscript_plot", "worldanvil_create_manuscriptplot", {
+      title: TITLES.plot,
+      version_id: ids.version,
+    });
+    const plot = await read("worldanvil_get_manuscriptplot", { plot_id: ids.plot });
+    expect(plot.title).toBe(TITLES.plot);
+    note(`plot fields: ${Object.keys(plot).sort().join(", ")}`);
+  });
+
+  it("creates a stat in the version and reads it back", async () => {
+    // `title` is not in the spec's stat example; sent for the harness, and
+    // the read-back shows whether World Anvil keeps it.
+    ids.stat = await reuseOrCreate("/manuscript_stat", "worldanvil_create_manuscriptstat", {
+      title: TITLES.stat,
+      version_id: ids.version,
+      notes: "Created by the live test.",
+    });
+    const stat = await read("worldanvil_get_manuscriptstat", { stat_id: ids.stat });
+    note(`stat title as stored: ${JSON.stringify(stat.title ?? null)}`);
+    note(`stat notes as stored: ${JSON.stringify(stat.notes ?? null)}`);
+    note(`stat fields: ${Object.keys(stat).sort().join(", ")}`);
   });
 });

@@ -29,6 +29,8 @@ function makeMockClient(overrides = {}) {
     updateMarker: stub("updateMarker"),
     createManuscriptPart: stub("createManuscriptPart"),
     createManuscriptBeat: stub("createManuscriptBeat"),
+    createManuscriptPlot: stub("createManuscriptPlot"),
+    createManuscriptStat: stub("createManuscriptStat"),
     ...overrides,
   };
 }
@@ -164,11 +166,11 @@ describe("Category handlers", () => {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Manuscript part and beat handlers (field names from World Anvil's spec;
-// the missing `type` was confirmed live 2026-10-15)
+// Manuscript part, beat, plot and stat handlers (field names from World
+// Anvil's spec; parts and beats confirmed live 2026-10-15)
 // ---------------------------------------------------------------------------
 
-describe("Manuscript part and beat handlers", () => {
+describe("Manuscript part, beat, plot and stat handlers", () => {
   let client;
 
   beforeEach(() => {
@@ -230,6 +232,39 @@ describe("Manuscript part and beat handlers", () => {
       const [payload] = client.createManuscriptBeat.mock.calls[0];
       expect(payload.title).toBe("Opening");
       expect(payload).not.toHaveProperty("manuscriptPart");
+    });
+  });
+
+  describe("worldanvil_create_manuscriptplot", () => {
+    it("links the version as `version`", async () => {
+      await handleToolCall(
+        "worldanvil_create_manuscriptplot",
+        { title: "Main Plot", version_id: "version-1" },
+        client,
+      );
+
+      const [payload] = client.createManuscriptPlot.mock.calls[0];
+      expect(payload).toEqual({ title: "Main Plot", version: { id: "version-1" } });
+    });
+  });
+
+  describe("worldanvil_create_manuscriptstat", () => {
+    it("links the version as `version` and sends notes only when given", async () => {
+      await handleToolCall(
+        "worldanvil_create_manuscriptstat",
+        { title: "Words", version_id: "version-1" },
+        client,
+      );
+      await handleToolCall(
+        "worldanvil_create_manuscriptstat",
+        { title: "Words", version_id: "version-1", notes: "Goal 80k" },
+        client,
+      );
+
+      const [first] = client.createManuscriptStat.mock.calls[0];
+      const [second] = client.createManuscriptStat.mock.calls[1];
+      expect(first).toEqual({ title: "Words", version: { id: "version-1" } });
+      expect(second.notes).toBe("Goal 80k");
     });
   });
 });

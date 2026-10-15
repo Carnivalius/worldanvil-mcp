@@ -2542,6 +2542,7 @@ export function getToolDefinitions() {
             type: "string",
             description: "Parent manuscript version ID",
           },
+          notes: { type: "string", description: "Notes (optional)" },
         },
         required: ["title", "version_id"],
       },

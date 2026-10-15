@@ -1240,13 +1240,12 @@ export async function handleToolCall(name, args, client) {
           }),
         );
 
-      case "worldanvil_create_manuscriptstat":
-        return jsonResponse(
-          await client.createManuscriptStat({
-            title: args.title,
-            manuscriptVersion: { id: args.version_id },
-          }),
-        );
+      case "worldanvil_create_manuscriptstat": {
+        // World Anvil requires `version` (not `manuscriptVersion`).
+        const data = { title: args.title, version: { id: args.version_id } };
+        if (args.notes !== undefined) data.notes = args.notes;
+        return jsonResponse(await client.createManuscriptStat(data));
+      }
 
       case "worldanvil_update_manuscriptstat": {
         const data = {};
@@ -1305,10 +1304,11 @@ export async function handleToolCall(name, args, client) {
         );
 
       case "worldanvil_create_manuscriptplot":
+        // World Anvil requires `version` (not `manuscriptVersion`).
         return jsonResponse(
           await client.createManuscriptPlot({
             title: args.title,
-            manuscriptVersion: { id: args.version_id },
+            version: { id: args.version_id },
           }),
         );
 
