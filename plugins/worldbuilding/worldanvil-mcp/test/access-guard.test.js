@@ -204,6 +204,63 @@ describe("fail closed", () => {
   });
 });
 
+describe("links on a manuscript part (chapter or scene)", () => {
+  // A scene in "Lore Notes", with a character, label and tag in the same
+  // world, and a character in another world.
+  const S = {
+    hero: "a0000000-0000-4000-8000-000000000011", // article in notes
+    label: "10000000-0000-4000-8000-000000000001", // -> manuscript
+    tag: "20000000-0000-4000-8000-000000000001", // -> manuscript
+  };
+  const extra = {
+    [S.hero]: { id: S.hero, title: "Narrator", world: { id: W.notes } },
+    [S.label]: { id: S.label, title: "Blue", manuscript: { id: I.manuscript } },
+    [S.tag]: { id: S.tag, title: "draft", manuscript: { id: I.manuscript } },
+  };
+  const send = (endpoint, method, body) => {
+    const id = new URLSearchParams(endpoint.split("?")[1] ?? "").get("id");
+    if ((method ?? "GET") === "GET" && extra[id]) return Promise.resolve(extra[id]);
+    return fakeSend(endpoint, method, body);
+  };
+  const access = () =>
+    new WorldAccess({ settings: validateSettings({}), file: "access.json", send, log: () => {} });
+  const part = `/manuscript_part?id=${I.part}`;
+
+  it("allows each link when it is in the part's own world", async () => {
+    const a = access();
+    for (const key of ["povCharacter", "label", "tags", "relatedCharacters", "relatedLocations", "relatedItems", "relatedArticles"]) {
+      const id = key === "label" ? S.label : key === "tags" ? S.tag : S.hero;
+      const value = key.startsWith("related") || key === "tags" ? [{ id }] : { id };
+      await a.check(part, "PATCH", { [key]: value });
+    }
+  });
+
+  it("looks up the world of every linked item", async () => {
+    await access().check(part, "PATCH", { povCharacter: { id: S.hero }, tags: [{ id: S.tag }] });
+    const looked = calls.map((c) => c.endpoint).join(" ");
+    expect(looked).toContain(`/manuscript?id=${I.manuscript}`); // tag -> manuscript -> world
+    expect(collectRefs({ tags: [{ id: S.tag }], label: { id: S.label } }, "/manuscript_part").map((r) => r.path))
+      .toEqual(["/manuscript_tag", "/manuscript_label"]);
+  });
+
+  it("refuses a POV or related article from another world", async () => {
+    await denied(access().check(part, "PATCH", { povCharacter: { id: I.campArticle } }), /cross-world links aren't allowed/);
+    await denied(
+      access().check(part, "PATCH", { relatedCharacters: [{ id: S.hero }, { id: I.campArticle }] }),
+      /cross-world links aren't allowed/,
+    );
+    await denied(
+      access().check("/manuscript_part", "PUT", { title: "s", version: { id: I.version }, povCharacter: { id: I.campArticle } }),
+      /mixes items/,
+    );
+  });
+
+  it("still refuses these keys on any other endpoint", () => {
+    for (const key of ["povCharacter", "label", "tags", "relatedArticles"])
+      expect(() => collectRefs({ [key]: { id: S.hero } }, "/article")).toThrow(/can't tell which world/);
+  });
+});
+
 describe("world lookups", () => {
   // Live World Anvil only includes a category's `world` at granularity=2.
   function lowDetailWithoutWorld(endpoint, method, body) {

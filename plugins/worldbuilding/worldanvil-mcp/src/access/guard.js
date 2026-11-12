@@ -68,6 +68,23 @@ const REF_PATHS = {
   secret: "/secret",
 };
 
+/**
+ * Reference keys that only mean something on one endpoint. A manuscript
+ * part (chapter or scene) links to articles, a label and tags; found live
+ * 2026-11-12. Scoped so the same key on another endpoint is still refused.
+ */
+const SCOPED_REF_PATHS = {
+  "/manuscript_part": {
+    povCharacter: "/article",
+    relatedCharacters: "/article",
+    relatedLocations: "/article",
+    relatedItems: "/article",
+    relatedArticles: "/article",
+    label: "/manuscript_label",
+    tags: "/manuscript_tag",
+  },
+};
+
 /** When an item has no direct `world`, follow these parent keys (in order). */
 const PARENT_KEYS = [
   "world",
@@ -130,7 +147,10 @@ export function collectRefs(body, requestPath) {
     if (key && (typeof value.id === "string" || typeof value.id === "number")) {
       const id = String(value.id);
       if (!ID_RE.test(id)) throw new AccessError(`"${id}" is not a valid World Anvil id`);
-      const path = key === "parent" ? requestPath : REF_PATHS[key];
+      const path =
+        key === "parent"
+          ? requestPath
+          : (SCOPED_REF_PATHS[requestPath]?.[key] ?? REF_PATHS[key]);
       if (!path)
         throw new AccessError(`can't tell which world "${key}" belongs to, so it was refused`);
       refs.push({ key, id, path });
