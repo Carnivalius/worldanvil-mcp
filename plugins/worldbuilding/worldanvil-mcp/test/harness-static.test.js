@@ -6,12 +6,14 @@
  *  - Credential and state files are gitignored.
  *  - No tracked file contains a protected world identifier (from the local snapshot).
  *  - No real-world identifiers or fingerprints are hard-coded in the harness.
+ *  - Neither API key from .env.test is in any tracked file or any commit.
  */
 
 import { execFileSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, relative } from "path";
 import { describe, it, expect } from "vitest";
+import { parse as parseEnv } from "dotenv";
 import { PATHS, PACKAGE_DIR } from "./live/harness/state.js";
 import { extractTokens } from "./live/harness/protected.js";
 
@@ -121,5 +123,47 @@ describe("no snapshot-protected identifiers in tracked files", () => {
           offenders.push(relative(root, file));
     }
     expect([...new Set(offenders)]).toEqual([]);
+  });
+});
+
+describe("no API keys in the repository", () => {
+  // Reads the real keys from the local, gitignored .env.test and looks for
+  // them (whole, or their first or last 20 characters) in every tracked file
+  // and in the full history of every local branch. Only file names and
+  // commit ids are ever reported; a key's value is never printed.
+  const keys = [];
+  if (existsSync(PATHS.env)) {
+    const env = parseEnv(readFileSync(PATHS.env));
+    for (const name of ["WA_AUTH_TOKEN", "WA_APP_KEY"]) {
+      const value = env[name];
+      if (typeof value !== "string" || value.length < 24) continue;
+      keys.push({ name, parts: [value, value.slice(0, 20), value.slice(-20)] });
+    }
+  }
+  const found = (text) => keys.filter((k) => k.parts.some((p) => text.includes(p))).map((k) => k.name);
+
+  it.skipIf(!keys.length)("tracked files contain neither key", () => {
+    const root = git(["rev-parse", "--show-toplevel"]).trim();
+    const offenders = [];
+    for (const rel of git(["-C", root, "ls-files", "-z"]).split("\0").filter(Boolean)) {
+      const file = join(root, rel);
+      if (!existsSync(file) || statSync(file).size > 2_000_000) continue;
+      for (const name of found(readFileSync(file, "utf8"))) offenders.push(`${name} in ${rel}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it.skipIf(!keys.length)("no commit on any local branch contains either key", () => {
+    const log = execFileSync("git", ["log", "--all", "-p", "--format=%x00%h%n%B"], {
+      cwd: PACKAGE_DIR,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024 * 1024,
+    });
+    const offenders = [];
+    for (const chunk of log.split("\0").filter(Boolean)) {
+      const names = found(chunk);
+      if (names.length) offenders.push(`${names.join(" and ")} in commit ${chunk.slice(0, chunk.indexOf("\n"))}`);
+    }
+    expect(offenders).toEqual([]);
   });
 });

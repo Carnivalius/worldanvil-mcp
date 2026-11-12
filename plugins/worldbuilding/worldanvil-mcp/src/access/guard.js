@@ -260,8 +260,12 @@ export class WorldAccess {
     );
   }
 
-  /** Work out which world an item belongs to (cached; items never change world). */
-  async worldOf(path, id, depth = 0) {
+  /**
+   * Work out which world an item belongs to (cached; items never change world).
+   * If the item had to be fetched to find out, it is left in `seen.item` so
+   * the caller can use that copy instead of asking World Anvil for it again.
+   */
+  async worldOf(path, id, depth = 0, seen = null) {
     if (path === "/world") return String(id).toLowerCase();
     const key = `${path}:${String(id).toLowerCase()}`;
     if (this.worldCache.has(key)) return this.worldCache.get(key);
@@ -269,6 +273,7 @@ export class WorldAccess {
     // Full detail: at granularity=1 World Anvil leaves `world` out of some
     // items (categories, found live 2026-10-15).
     const item = await this.send(`${path}?id=${id}&granularity=2`, "GET");
+    if (seen && depth === 0) seen.item = item;
     let world = null;
     if (item?.world?.id) world = String(item.world.id).toLowerCase();
     else
@@ -344,7 +349,8 @@ export class WorldAccess {
 
     // ---- read / update / delete an existing item ---------------------------
     if (!id) throw new AccessError(`no id given for ${path.slice(1)}`);
-    const worldId = await this.worldOf(path, id);
+    const seen = { item: null };
+    const worldId = await this.worldOf(path, id, 0, seen);
     if (action !== "read" && refs.some((r) => r.key === "world"))
       throw new AccessError("moving items between worlds isn't allowed");
     if (refs.length) {
@@ -355,7 +361,8 @@ export class WorldAccess {
         );
     }
     this.requireAction(worldId, action);
-    return { action, path, id, worldId };
+    // `item`: the full copy fetched a moment ago to find the world, if any.
+    return { action, path, id, worldId, item: seen.item };
   }
 
   /** All references must be in one world; returns it. */
@@ -414,6 +421,13 @@ export class WorldAccess {
  *   defaults to the client's own HTTPS request. The live-test harness passes
  *   its own guarded transport here so both layers see every request.
  */
+/** True for GET <path>?id=<id>&granularity=2 and nothing else. */
+function isFullRead(endpoint, method) {
+  if (String(method).toUpperCase() !== "GET") return false;
+  const params = new URLSearchParams(String(endpoint).split("?")[1] ?? "");
+  return [...params.keys()].sort().join(",") === "granularity,id" && params.get("granularity") === "2";
+}
+
 export function guardClient(client, access, backups = null, transport = null) {
   const raw = transport ?? Object.getPrototypeOf(client).request.bind(client);
   access.send = raw;
@@ -430,7 +444,8 @@ export function guardClient(client, access, backups = null, transport = null) {
           throw new AccessError("backups aren't configured, so changes are refused");
         let current;
         try {
-          current = await raw(`${decision.path}?id=${decision.id}&granularity=2`, "GET");
+          current =
+            decision.item ?? (await raw(`${decision.path}?id=${decision.id}&granularity=2`, "GET"));
           backups.saveItem({
             worldId: decision.worldId,
             worldTitle: access.worlds?.get(decision.worldId) ?? "",
@@ -443,6 +458,11 @@ export function guardClient(client, access, backups = null, transport = null) {
           throw new AccessError(`couldn't back up the item first (${e.message}), so nothing was changed`);
         }
       }
+
+      // A full-detail read of an item the check has just fetched: same
+      // request, same answer, so don't send it twice.
+      if (decision.action === "read" && decision.item && isFullRead(endpoint, method))
+        return decision.item;
 
       const response = await raw(endpoint, method, body);
       if (decision.path === "/user/worlds") return access.annotateWorldList(response);

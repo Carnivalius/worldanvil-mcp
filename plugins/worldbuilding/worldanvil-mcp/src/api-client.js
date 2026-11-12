@@ -20,6 +20,35 @@ export const API_PATH = "/api/external/boromir";
 export const USER_AGENT = `worldanvil-mcp-fork (https://github.com/Carnivalius/worldanvil-mcp, ${PKG_VERSION})`;
 
 /**
+ * Smallest gap between two requests, measured on the clock from when one
+ * is sent to when the next is sent (so time the caller spends between
+ * calls counts towards it). World Anvil publishes no rate limit; 750 ms is
+ * the original project's rule of thumb and has never been refused live.
+ */
+export const DEFAULT_MIN_INTERVAL_MS = 750;
+
+/** After a rate-limit answer (HTTP 429): pause this long, then try once more. */
+export const RATE_LIMIT_PAUSE_MS = 5000;
+const RATE_LIMIT_PAUSE_MAX_MS = 30000;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function apiError(status, message, retryAfter) {
+  const err = new Error(`API Error (${status}): ${message}`);
+  err.status = status;
+  if (retryAfter !== undefined) err.retryAfter = retryAfter;
+  return err;
+}
+
+function minIntervalFrom(config) {
+  const raw = config.minIntervalMs ?? process.env.WA_MIN_INTERVAL_MS ?? DEFAULT_MIN_INTERVAL_MS;
+  const ms = Number(raw);
+  if (!Number.isFinite(ms) || ms < 0)
+    throw new Error("WA_MIN_INTERVAL_MS must be a number of milliseconds, 0 or more");
+  return ms;
+}
+
+/**
  * World Anvil API Client
  *
  * Provides methods for all World Anvil Boromir API endpoints. Calls World
@@ -56,10 +85,19 @@ export class WorldAnvilClient {
 
     this.apiBase = API_HOST;
     this.apiPath = API_PATH;
+
+    this.minIntervalMs = minIntervalFrom(config);
+    // Pacing state lives in its own object so it still works if the client
+    // itself is frozen.
+    this.pace = { lastSentAt: 0, queue: Promise.resolve() };
   }
 
   /**
-   * Make a request to the World Anvil API
+   * Make a request to the World Anvil API.
+   *
+   * Requests go out one at a time, in the order they were made, at least
+   * `minIntervalMs` apart. A rate-limit answer is retried once after a
+   * pause; a second one is reported in plain words.
    *
    * @param {string} endpoint - API endpoint path
    * @param {string} [method='GET'] - HTTP method
@@ -67,6 +105,35 @@ export class WorldAnvilClient {
    * @returns {Promise<Object>} API response
    */
   async request(endpoint, method = "GET", body = null) {
+    const run = this.pace.queue.then(() => this.sendPaced(endpoint, method, body));
+    this.pace.queue = run.catch(() => {});
+    return run;
+  }
+
+  async sendPaced(endpoint, method, body) {
+    for (let attempt = 0; ; attempt++) {
+      const wait = this.pace.lastSentAt + this.minIntervalMs - Date.now();
+      if (wait > 0) await sleep(wait);
+      this.pace.lastSentAt = Date.now();
+      try {
+        return await this.send(endpoint, method, body);
+      } catch (err) {
+        if (err.status !== 429) throw err;
+        if (attempt >= 1)
+          throw new Error(
+            "World Anvil is limiting requests right now (HTTP 429), twice in a row. " +
+              "This call changed nothing. Wait a minute and try again.",
+          );
+        const asked = Number(err.retryAfter) * 1000;
+        await sleep(
+          Math.min(Math.max(Number.isFinite(asked) ? asked : 0, RATE_LIMIT_PAUSE_MS), RATE_LIMIT_PAUSE_MAX_MS),
+        );
+      }
+    }
+  }
+
+  /** Send one HTTPS request now. Use request(), which paces and retries. */
+  send(endpoint, method = "GET", body = null) {
     return new Promise((resolve, reject) => {
       const postData = body ? JSON.stringify(body) : "";
 
@@ -112,13 +179,13 @@ export class WorldAnvilClient {
                 : typeof parsed === "object"
                   ? JSON.stringify(parsed)
                   : data;
-              reject(new Error(`API Error (${res.statusCode}): ${errorMsg}`));
+              reject(apiError(res.statusCode, errorMsg, res.headers?.["retry-after"]));
             }
           } catch (e) {
             if (res.statusCode >= 200 && res.statusCode < 300) {
               resolve(data);
             } else {
-              reject(new Error(`API Error (${res.statusCode}): ${data}`));
+              reject(apiError(res.statusCode, data, res.headers?.["retry-after"]));
             }
           }
         });

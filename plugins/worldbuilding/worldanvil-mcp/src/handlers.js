@@ -84,11 +84,33 @@ export async function handleToolCall(name, args, client) {
           throw new Error(
             'access_level must be "full_edit", "edit_only" or "read_only" (ask the user which they want)',
           );
-        const created = await client.createWorld({ title: args.title });
+        // Private by default: the world and every article later made in it.
+        // This tool never makes anything public; that is done on the website.
+        const created = await client.createWorld({
+          title: args.title,
+          state: "private",
+          articlesPrivateOnCreation: true,
+        });
         const note = client.access
           ? `Added to your access settings as "${await client.access.onWorldCreated(created.id, args.title, level)}": ${level}`
           : undefined;
-        return jsonResponse(note ? { ...created, access_settings: note } : created);
+
+        // Say plainly if World Anvil did not apply the privacy settings.
+        let privacy;
+        try {
+          const world = await client.getWorld(created.id);
+          privacy =
+            world?.state === "private" && world?.articlesPrivateOnCreation === true
+              ? "private (world and new articles)"
+              : `WARNING: World Anvil created this world with state "${world?.state}" and ` +
+                `articlesPrivateOnCreation=${world?.articlesPrivateOnCreation}. ` +
+                "Set it to private on the World Anvil website before adding anything to it.";
+        } catch (e) {
+          privacy =
+            "WARNING: couldn't confirm this world is private " +
+            `(${e.message}). Check its privacy on the World Anvil website before adding anything to it.`;
+        }
+        return jsonResponse({ ...created, ...(note ? { access_settings: note } : {}), privacy });
       }
 
       case "worldanvil_update_world": {

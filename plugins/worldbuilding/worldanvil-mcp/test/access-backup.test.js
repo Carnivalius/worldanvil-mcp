@@ -28,9 +28,7 @@ function fakeSend(endpoint, method = "GET") {
   if (path === "/identity") return Promise.resolve({ id: USER });
   if (path === "/user/worlds") return Promise.resolve({ entities: [{ id: WORLD, title: "My Epic Saga" }] });
   if (path === "/article" && method === "GET") {
-    // The guard's world lookup reads the article first; fail the backup read after it.
-    const reads = calls.filter((c) => c.endpoint.startsWith("/article?") && c.method === "GET");
-    if (failBackupRead && reads.length > 1) return Promise.reject(new Error("timeout"));
+    if (failBackupRead) return Promise.reject(new Error("timeout"));
     return Promise.resolve(article);
   }
   return Promise.resolve({ success: true });
@@ -108,12 +106,36 @@ describe("backups before changes", () => {
 
   it("no backup, no change: refuses if the backup read fails", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
+    const c = await connect({}, dir);
+    // A first edit succeeds; the article's world is now remembered, so the
+    // next edit's only read is the backup read.
+    await c.callTool({ name: "worldanvil_update_article", arguments: { article_id: ARTICLE, content: "v2" } });
+    expect(calls.filter((x) => x.method === "PATCH")).toHaveLength(1);
+
+    failBackupRead = true;
+    const r = await c.callTool({ name: "worldanvil_update_article", arguments: { article_id: ARTICLE, content: "v3" } });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toMatch(/couldn't back up the item first.*nothing was changed/);
+    expect(calls.filter((x) => x.method === "PATCH")).toHaveLength(1);
+    expect(files(dir)).toHaveLength(1);
+  });
+
+  it("refuses an edit when the item can't be read at all", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
     failBackupRead = true;
     const c = await connect({}, dir);
     const r = await c.callTool({ name: "worldanvil_update_article", arguments: { article_id: ARTICLE, content: "v2" } });
     expect(r.isError).toBe(true);
-    expect(r.content[0].text).toMatch(/couldn't back up the item first.*nothing was changed/);
     expect(calls.some((x) => x.method === "PATCH")).toBe(false);
+    expect(files(dir)).toHaveLength(0);
+  });
+
+  it("backs up from a single read on an item's first edit", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
+    const c = await connect({}, dir);
+    await c.callTool({ name: "worldanvil_update_article", arguments: { article_id: ARTICLE, content: "v2" } });
+    expect(calls.filter((x) => x.endpoint.startsWith("/article?")).map((x) => x.method)).toEqual(["GET", "PATCH"]);
+    expect(JSON.parse(readFileSync(files(dir)[0], "utf8")).data.content).toBe("Original text v1");
   });
 
   it("refuses changes when no backup folder is configured", async () => {

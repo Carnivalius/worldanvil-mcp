@@ -56,13 +56,14 @@ const WORLDS = [
 ];
 
 let calls;
+let newWorldPrivacy; // what the fake World Anvil reports for a world read
 function fakeSend(endpoint, method = "GET", body = null) {
   calls.push({ endpoint, method, body });
   const [path, q = ""] = endpoint.split("?");
   const id = new URLSearchParams(q).get("id");
   if (path === "/identity") return Promise.resolve({ id: USER, username: "tester" });
   if (path === "/user/worlds") return Promise.resolve({ entities: WORLDS });
-  if (method === "GET" && path === "/world") return Promise.resolve({ id, title: "w" });
+  if (method === "GET" && path === "/world") return Promise.resolve({ id, title: "w", ...newWorldPrivacy });
   if (method === "GET" && ITEMS[id]) return Promise.resolve(ITEMS[id]);
   if (method === "PUT") return Promise.resolve({ id: "99999999-9999-4999-8999-999999999999", success: true });
   return Promise.resolve({ success: true, entities: [] });
@@ -79,6 +80,7 @@ function makeAccess(settings = {}) {
 
 beforeEach(() => {
   calls = [];
+  newWorldPrivacy = {};
 });
 
 const denied = (p, re) => expect(p).rejects.toThrow(re ?? AccessError);
@@ -396,6 +398,59 @@ describe("server: end to end (fake World Anvil)", () => {
     expect(text(r)).toMatch(/more than one id|not a valid/);
   });
 
+  it("reads an item from World Anvil once, not twice", async () => {
+    const c = await connect({});
+    const gets = () => calls.filter((x) => x.endpoint.startsWith(`/article?id=${I.article}`));
+
+    // First read: the world lookup fetches the article; that copy is the answer.
+    const first = await c.callTool({ name: "worldanvil_get_article", arguments: { article_id: I.article } });
+    expect(JSON.parse(text(first)).title).toBe("Hero");
+    expect(gets()).toHaveLength(1);
+
+    // Later reads: the world is remembered, so only the read itself is sent,
+    // and it is sent every time (the content is never served from memory).
+    const second = await c.callTool({ name: "worldanvil_get_article", arguments: { article_id: I.article } });
+    expect(JSON.parse(text(second)).title).toBe("Hero");
+    expect(gets()).toHaveLength(2);
+  });
+
+  it("uses the copy it just fetched as the backup before an edit", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-access-"));
+    const file = join(dir, "access.json");
+    writeFileSync(file, JSON.stringify({}));
+    const c = await connect({}, file);
+    const r = await c.callTool({
+      name: "worldanvil_update_article",
+      arguments: { article_id: I.article, title: "Hero II" },
+    });
+    expect(r.isError).toBeFalsy();
+    const touched = calls.filter((x) => x.endpoint.startsWith(`/article?id=${I.article}`));
+    expect(touched.map((x) => x.method)).toEqual(["GET", "PATCH"]);
+    const saved = readdirSync(join(dir, "backups"), { recursive: true }).filter((f) => String(f).endsWith(".json"));
+    expect(saved.length).toBe(1);
+    expect(readFileSync(join(dir, "backups", String(saved[0])), "utf8")).toContain("Hero");
+  });
+
+  it("create_world confirms privacy when World Anvil applied it, and never edits a world", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-access-"));
+    const file = join(dir, "access.json");
+    writeFileSync(file, JSON.stringify({}));
+    WORLDS.push({ id: "99999999-9999-4999-8999-999999999999", title: "Quiet World" });
+    newWorldPrivacy = { state: "private", articlesPrivateOnCreation: true };
+    try {
+      const c = await connect({}, file);
+      const r = await c.callTool({
+        name: "worldanvil_create_world",
+        arguments: { title: "Quiet World", access_level: "full_edit" },
+      });
+      expect(r.isError).toBeFalsy();
+      expect(JSON.parse(text(r)).privacy).toBe("private (world and new articles)");
+      expect(calls.some((x) => x.method === "PATCH" && x.endpoint.startsWith("/world"))).toBe(false);
+    } finally {
+      WORLDS.pop();
+    }
+  });
+
   it("list_worlds shows blocked worlds as blocked", async () => {
     const c = await connect({ world_list: { "Old Campaign": "blocked" } });
     const r = await c.callTool({ name: "worldanvil_list_worlds", arguments: {} });
@@ -420,6 +475,11 @@ describe("server: end to end (fake World Anvil)", () => {
       expect(JSON.parse(text(r)).access_settings).toBe(
         'Added to your access settings as "Brand New World": edit_only',
       );
+      // Private by default: asked for in the create request itself.
+      const put = calls.find((x) => x.method === "PUT" && x.endpoint === "/world");
+      expect(put.body).toEqual({ title: "Brand New World", state: "private", articlesPrivateOnCreation: true });
+      // The fake World Anvil here did not report the world as private: say so loudly.
+      expect(JSON.parse(text(r)).privacy).toMatch(/^WARNING: .*Set it to private on the World Anvil website/);
       const saved = JSON.parse(readFileSync(file, "utf8"));
       expect(saved.world_list).toEqual({ "My Epic Saga": "full_edit", "Brand New World": "edit_only" });
       expect(readdirSync(dir).some((f) => f.endsWith(".bak"))).toBe(true);

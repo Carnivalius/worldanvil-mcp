@@ -38,7 +38,8 @@ export function getToolDefinitions() {
     },
     {
       name: "worldanvil_create_world",
-      description: "Create a new world in WorldAnvil",
+      description:
+        "Create a new world in WorldAnvil. The world is created private, with new articles private too; this tool never makes a world public (do that on the World Anvil website). The result's `privacy` field says whether World Anvil applied it.",
       inputSchema: {
         type: "object",
         properties: {
