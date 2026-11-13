@@ -482,5 +482,6 @@ export function guardClient(client, access, backups = null, transport = null) {
     },
   });
   client.access = access;
+  client.backups = backups;
   return client;
 }

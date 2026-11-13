@@ -73,6 +73,27 @@ export function getToolDefinitions() {
       },
     },
     {
+      name: "worldanvil_backup_world",
+      description:
+        "Save a local copy of everything in a world to the user's backup folder: categories, articles, secrets, timelines, maps, notebooks, statblocks, variables, canvases and manuscripts (a world need not have all of these). Take one before making changes to a world. A large world takes several minutes, so each call works for a limited time: if the answer has done: false, call again with the same world_id until it says done: true, and change nothing in the world until then. Items unchanged since the last backup are copied from it rather than read again. If World Anvil refuses one kind of content, the answer has a warning naming what is missing and everything else is still saved. Image files and subscriber groups are not included. Changes nothing on World Anvil.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          world_id: { type: "string", description: "The ID of the world to back up" },
+          full: {
+            type: "boolean",
+            description:
+              "Read every item from World Anvil, even ones unchanged since the last backup (slower). Default false.",
+          },
+          restart: {
+            type: "boolean",
+            description: "Discard a backup that is in progress and start again. Default false.",
+          },
+        },
+        required: ["world_id"],
+      },
+    },
+    {
       name: "worldanvil_delete_world",
       description: "Delete a world from WorldAnvil",
       inputSchema: {

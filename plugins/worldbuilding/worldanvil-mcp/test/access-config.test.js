@@ -52,6 +52,7 @@ describe("validateSettings", () => {
       item_backup_keep: 10,
       world_backup_keep: 5,
       allow_blocked_backup: false,
+      backup_folder: "",
     });
   });
 
@@ -65,6 +66,8 @@ describe("validateSettings", () => {
     [{ allow_only: "yes" }, /true or false/],
     [{ item_backup_keep: 0 }, /at least 1/],
     [{ world_backup_keep: 2.5 }, /whole number/],
+    [{ backup_folder: 7 }, /backup_folder/],
+    [{ backup_folder: "backups/here" }, /must be a full path/],
   ];
   for (const [input, message] of bad)
     it(`rejects ${JSON.stringify(input)}`, () => {
@@ -129,5 +132,37 @@ describe("appendWorldEntry (add-only)", () => {
     writeFileSync(file, JSON.stringify({ world_list: { "Old Campaign": "blocked" } }));
     expect(appendWorldEntry(file, "old campaign", "full_edit")).toBe(false);
     expect(JSON.parse(readFileSync(file, "utf8")).world_list).toEqual({ "Old Campaign": "blocked" });
+  });
+});
+
+describe("backup folder", () => {
+  it("defaults to a backups folder beside the settings file", async () => {
+    const { backupFolderFor } = await import("../src/access/config.js");
+    const file = join(tmp(), "access.json");
+    expect(backupFolderFor(validateSettings({}), file)).toBe(join(file, "..", "backups"));
+  });
+
+  it("uses the folder named in the settings", async () => {
+    const { backupFolderFor } = await import("../src/access/config.js");
+    const chosen = join(tmp(), "My Backups");
+    expect(backupFolderFor(validateSettings({ backup_folder: `  ${chosen} ` }), join(tmp(), "access.json"))).toBe(chosen);
+  });
+
+  it("refuses a folder inside a git repository, default or chosen", async () => {
+    const { backupFolderFor, gitRepoAround } = await import("../src/access/config.js");
+    const repo = tmp();
+    writeFileSync(join(repo, ".git"), "gitdir: elsewhere\n");
+    const inside = join(repo, "plugins", "backups");
+    expect(gitRepoAround(inside)).toBe(repo);
+    expect(gitRepoAround(tmp())).toBeNull();
+    expect(() => backupFolderFor(validateSettings({ backup_folder: inside }), join(tmp(), "access.json"))).toThrow(
+      /inside a git repository.*private writing/s,
+    );
+    expect(() => backupFolderFor(validateSettings({}), join(repo, "access.json"))).toThrow(/inside a git repository/);
+  });
+
+  it("has nowhere to put backups when the settings file has no real path", async () => {
+    const { backupFolderFor } = await import("../src/access/config.js");
+    expect(backupFolderFor(validateSettings({}), "access.json")).toBeNull();
   });
 });

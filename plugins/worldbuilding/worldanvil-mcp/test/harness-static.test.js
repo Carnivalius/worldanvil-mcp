@@ -11,7 +11,7 @@
 
 import { execFileSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
-import { join, relative } from "path";
+import { join, relative, resolve, sep } from "path";
 import { describe, it, expect } from "vitest";
 import { parse as parseEnv } from "dotenv";
 import { PATHS, PACKAGE_DIR } from "./live/harness/state.js";
@@ -88,10 +88,16 @@ describe("no hard-coded world identifiers", () => {
 });
 
 describe("gitignore", () => {
-  for (const file of [PATHS.env, PATHS.ledger, PATHS.protected, PATHS.access, PATHS.backups])
+  for (const file of [PATHS.env, PATHS.ledger, PATHS.protected, PATHS.access])
     it(`${relative(PACKAGE_DIR, file)} is ignored`, () => {
       expect(() => git(["check-ignore", "-q", file])).not.toThrow();
     });
+
+  it("live-test backups are kept outside the repository", () => {
+    const root = resolve(git(["rev-parse", "--show-toplevel"]).trim());
+    const backups = resolve(PATHS.backups);
+    expect(backups === root || backups.startsWith(root + sep), `${backups} is inside ${root}`).toBe(false);
+  });
 });
 
 describe("no snapshot-protected identifiers in tracked files", () => {

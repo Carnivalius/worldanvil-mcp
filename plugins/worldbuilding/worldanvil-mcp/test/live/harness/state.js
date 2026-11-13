@@ -4,6 +4,11 @@
  * Both files are gitignored and live in the package directory:
  *   test-ledger.json       - every resource the tests created (append-only log)
  *   protected-worlds.json  - every pre-existing world id/slug (append-only)
+ *
+ * Backups taken during live tests go OUTSIDE the git repository: a folder
+ * named "worldanvil_backup" beside the repository, or wherever
+ * WA_TEST_BACKUP_DIR points. They hold world content and must never be
+ * somewhere a commit could pick them up.
  */
 
 import { existsSync, readFileSync, renameSync, writeFileSync } from "fs";
@@ -17,12 +22,15 @@ export const PACKAGE_DIR = join(
   "..",
 );
 
+/** The repository root: the package sits three folders down inside it. */
+export const REPO_DIR = join(PACKAGE_DIR, "..", "..", "..");
+
 export const PATHS = {
   env: join(PACKAGE_DIR, ".env.test"),
   ledger: join(PACKAGE_DIR, "test-ledger.json"),
   protected: join(PACKAGE_DIR, "protected-worlds.json"),
   access: join(PACKAGE_DIR, "test-access.json"),
-  backups: join(PACKAGE_DIR, "test-backups"),
+  backups: process.env.WA_TEST_BACKUP_DIR || join(REPO_DIR, "..", "worldanvil_backup"),
 };
 
 function readJson(file) {

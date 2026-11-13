@@ -13,6 +13,7 @@ import {
   templateOfArticle,
 } from "./article-templates.js";
 import { listPage, worldOutline } from "./listing.js";
+import { backupWorld } from "./access/world-backup.js";
 
 /**
  * Article `fields` may only carry template text/number/yes-no values. They
@@ -189,6 +190,14 @@ export async function handleToolCall(name, args, client) {
         if (args.title !== undefined) data.title = args.title;
         return jsonResponse(await client.updateWorld(args.world_id, data));
       }
+
+      case "worldanvil_backup_world":
+        return jsonResponse(
+          await backupWorld(client, args.world_id, {
+            full: args.full === true,
+            restart: args.restart === true,
+          }),
+        );
 
       case "worldanvil_delete_world":
         return jsonResponse(await client.deleteWorld(args.world_id));

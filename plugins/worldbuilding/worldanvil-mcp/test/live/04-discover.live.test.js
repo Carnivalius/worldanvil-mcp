@@ -11,7 +11,7 @@
  * world) before it is read in full. Adopted items are never deleted
  * directly; they go with the manuscript.
  *
- * The full read-back is written to test-backups/ (gitignored); a slimmed
+ * The full read-back is written to the live-test backup folder (outside the repository); a slimmed
  * view is logged as [discover] lines. Findings belong in the API guide,
  * without ids.
  */
@@ -223,7 +223,7 @@ describe.runIf(enabled)("discovery: read back the test manuscript", () => {
     note(`icon: checked ${mine.length} tool-made articles`);
   });
 
-  it("writes the full read-back to test-backups/", () => {
+  it("writes the full read-back to the backup folder", () => {
     mkdirSync(PATHS.backups, { recursive: true });
     const file = join(PATHS.backups, `discovery-${new Date().toISOString().slice(0, 10)}.json`);
     writeFileSync(file, JSON.stringify(dump, null, 2) + "\n", "utf8");

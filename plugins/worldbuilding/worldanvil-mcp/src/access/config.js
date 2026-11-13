@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "fs";
 import { homedir } from "os";
-import { dirname, join } from "path";
+import { dirname, isAbsolute, join, resolve } from "path";
 
 export const LEVELS = ["full_edit", "edit_only", "read_only", "blocked"];
 
@@ -29,6 +29,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   item_backup_keep: 10,
   world_backup_keep: 5,
   allow_blocked_backup: false,
+  // Where backups are kept. "" = a "backups" folder beside this settings file.
+  backup_folder: "",
 });
 
 export class AccessConfigError extends Error {
@@ -203,7 +205,47 @@ export function validateSettings(raw, file = "settings") {
     if (!Number.isInteger(s[key]) || s[key] < 1)
       throw err(`"${key}" must be a whole number of at least 1`);
 
-  return { ...s, world_list: { ...s.world_list } };
+  if (typeof s.backup_folder !== "string")
+    throw err('"backup_folder" must be a folder path in quotes, or "" for the default');
+  if (s.backup_folder.trim() && !isAbsolute(s.backup_folder.trim()))
+    throw err(
+      `"backup_folder" must be a full path (for example C:\\Users\\you\\Documents\\WorldAnvil Backups), not "${s.backup_folder}"`,
+    );
+
+  return { ...s, world_list: { ...s.world_list }, backup_folder: s.backup_folder.trim() };
+}
+
+/** The git repository a folder sits inside, or null. */
+export function gitRepoAround(folder) {
+  let dir = resolve(folder);
+  for (;;) {
+    if (existsSync(join(dir, ".git"))) return dir;
+    const up = dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+}
+
+/**
+ * Where backups go: the "backup_folder" setting if given, otherwise a
+ * "backups" folder beside the settings file. Backups hold the user's
+ * private writing, so a folder inside a git repository is refused: it
+ * could be committed and pushed by accident.
+ *
+ * @returns {string|null} null when there is nowhere to put them
+ */
+export function backupFolderFor(settings, file) {
+  const chosen = settings?.backup_folder?.trim();
+  const folder = chosen || (file && isAbsolute(file) ? join(dirname(file), "backups") : null);
+  if (!folder) return null;
+  const repo = gitRepoAround(folder);
+  if (repo)
+    throw new AccessConfigError(
+      `the backup folder (${folder}) is inside a git repository (${repo}). Backups hold your private ` +
+        'writing and could be committed by accident. Set "backup_folder" to a folder outside it.',
+      file ?? "settings",
+    );
+  return folder;
 }
 
 /**

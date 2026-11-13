@@ -437,9 +437,13 @@ describe("paging", () => {
   it("listAll collects every page and stops on a repeat", async () => {
     expect(await listAll(fakeList(123))).toHaveLength(123);
     expect(await listAll(fakeList(0))).toEqual([]);
-    const stuck = vi.fn(async () => ({ entities: [{ id: "same" }] }));
-    expect(await listAll(stuck)).toHaveLength(1);
+    const stuck = vi.fn(async ({ limit }) => ({ entities: Array.from({ length: Number(limit) }, (_, i) => ({ id: `same-${i}` })) }));
+    expect(await listAll(stuck)).toHaveLength(50);
     expect(stuck).toHaveBeenCalledTimes(2);
+    // A short page is the end: no extra request to prove it.
+    const short = fakeList(7);
+    expect(await listAll(short)).toHaveLength(7);
+    expect(short).toHaveBeenCalledTimes(1);
   });
 });
 

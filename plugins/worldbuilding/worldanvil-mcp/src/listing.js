@@ -86,6 +86,9 @@ export async function listAll(fetchPage, { pageSize = DEFAULT_PAGE, maxItems = 2
       fresh += 1;
     }
     if (fresh === 0) break; // the same page again: stop rather than loop
+    // A short page below the size World Anvil is known to return is the end:
+    // no need to ask for an empty page to prove it.
+    if (got.length < pageSize && got.length < PROVEN_PAGE) break;
     offset += got.length;
   }
   return items;

@@ -138,7 +138,7 @@ for (const [group, resources] of Object.entries(GROUP_RESOURCES)) {
  */
 function getToolGroup(toolName) {
   const resource = toolName.replace(
-    /^worldanvil_(get|list|create|update|delete)_/,
+    /^worldanvil_(get|list|create|update|delete|backup)_/,
     "",
   );
   return RESOURCE_TO_GROUP.get(resource) || "core";

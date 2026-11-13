@@ -18,7 +18,7 @@ import { WorldAnvilClient } from "./api-client.js";
 import { getToolDefinitions } from "./tools.js";
 import { handleToolCall } from "./handlers.js";
 import { parseToolGroups, filterTools } from "./tool-groups.js";
-import { loadSettings } from "./access/config.js";
+import { backupFolderFor, loadSettings } from "./access/config.js";
 import { WorldAccess, guardClient } from "./access/guard.js";
 import { Backups } from "./access/backup.js";
 import { dirname, isAbsolute, join } from "path";
@@ -97,8 +97,10 @@ export function createServer(config = {}) {
 
   const { settings, file, backupDir } = config.access ?? loadSettings();
   const access = new WorldAccess({ settings, file });
-  // Backups live next to the settings file (never inside the repository).
-  const dir = backupDir ?? (isAbsolute(file) ? join(dirname(file), "backups") : null);
+  // Backups go where the settings say (default: beside the settings file),
+  // and never inside a git repository. Tests and the harness pass their own.
+  const dir = backupDir ?? backupFolderFor(settings, file);
+  if (dir) console.error(`Backups are kept in: ${dir}`);
   const backups = dir ? new Backups({ dir, keep: settings.item_backup_keep }) : null;
   guardClient(client, access, backups, config.transport);
 

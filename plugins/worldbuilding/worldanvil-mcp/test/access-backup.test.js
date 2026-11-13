@@ -73,7 +73,7 @@ describe("backups before changes", () => {
     expect(r.isError).toBeFalsy();
     const saved = files(dir);
     expect(saved).toHaveLength(1);
-    expect(saved[0]).toMatch(/items[\\/]My Epic Saga-11111111[\\/]article[\\/]a0000000-.*-update\.json$/);
+    expect(saved[0]).toMatch(/items[\\/]My Epic Saga-11111111[\\/]article[\\/]Hero - a0000000-[0-9a-f-]+[\\/][^\\/]+-update\.json$/);
     const record = JSON.parse(readFileSync(saved[0], "utf8"));
     expect(record).toMatchObject({ reason: "before update", id: ARTICLE, data: { content: "Original text v1" } });
     expect(statSync(saved[0]).mode & 0o222).toBe(0); // not writable
