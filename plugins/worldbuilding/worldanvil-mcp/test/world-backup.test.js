@@ -418,3 +418,92 @@ describe("item backup names", () => {
     expect(file).toContain("untitled - s1");
   });
 });
+
+describe("an untouched manuscript is not walked again", () => {
+  const novel = (stamp) => ({
+    ...worldState(),
+    extra: {
+      listManuscripts: () => [{ id: "ms1", title: "Novel", updateDate: { date: stamp } }],
+      listManuscriptVersions: (id) => (id === "ms1" ? [{ id: "v1", title: "Draft 1", updateDate: { date: stamp } }] : []),
+      listManuscriptParts: (id) => (id === "v1" ? [{ id: "p1", title: "Chapter 1", updateDate: { date: stamp } }, { id: "p2", title: "Scene 1", updateDate: { date: stamp } }] : []),
+      listManuscriptBeats: (id) => (id === "p2" ? [{ id: "b1", title: "Beat" }] : []),
+      listManuscriptLabels: (id) => (id === "ms1" ? [{ id: "lb1", title: "Blue" }] : []),
+    },
+    failList: { listManuscriptBookmarks: { status: 422, message: "bookmarks broken" } },
+  });
+  const insideCalls = (client) =>
+    ["listManuscriptVersions", "listManuscriptParts", "listManuscriptBeats", "listManuscriptLabels", "listManuscriptTags", "listManuscriptBookmarks", "getManuscript", "getManuscriptVersion", "getManuscriptPart", "getManuscriptBeat", "getManuscriptLabel"]
+      .map((m) => client[m].mock.calls.length)
+      .reduce((a, b) => a + b, 0);
+
+  it("copies everything inside it without a single request, and the backup is still complete", async () => {
+    const now = clock();
+    const first = await backupWorld(fakeClient(novel("d1")), WORLD, { now });
+    expect(first.counts).toMatchObject({ manuscripts: 1, "chapters and scenes": 2, beats: 1, "manuscript labels": 1 });
+
+    now.jump(60_000);
+    const client = fakeClient(novel("d1"));
+    const second = await backupWorld(client, WORLD, { now });
+
+    expect(insideCalls(client)).toBe(0);
+    expect(second).toMatchObject({ done: true, read_from_world_anvil: 0, manuscripts_unchanged_and_not_walked: 1 });
+    expect(second.counts).toEqual(first.counts);
+    expect(second.total).toBe(first.total);
+    // Stampless pieces (the beat, the label) were copied too, not read.
+    expect(json(second.folder, "manuscript-beats", "Beat - b1.json").parent).toEqual({ type: "manuscript_part", id: "p2" });
+    expect(existsSync(join(second.folder, "manuscript-labels", "Blue - lb1.json"))).toBe(true);
+    const manifest = json(second.folder, "manifest.json");
+    expect(manifest.items.every((i) => existsSync(join(second.folder, i.file)))).toBe(true);
+    // What World Anvil refused inside it last time is still reported.
+    expect(second.warning).toMatch(/manuscript bookmarks/);
+    expect(manifest.could_not_be_saved).toHaveLength(1);
+  });
+
+  it("carries forward again from a backup that was itself carried", async () => {
+    const now = clock();
+    await backupWorld(fakeClient(novel("d1")), WORLD, { now });
+    now.jump(60_000);
+    await backupWorld(fakeClient(novel("d1")), WORLD, { now });
+    now.jump(60_000);
+    const client = fakeClient(novel("d1"));
+    const third = await backupWorld(client, WORLD, { now });
+    expect(insideCalls(client)).toBe(0);
+    expect(third.counts).toMatchObject({ "chapters and scenes": 2, beats: 1, "manuscript labels": 1 });
+  });
+
+  it("walks it again when its change date has moved", async () => {
+    const now = clock();
+    await backupWorld(fakeClient(novel("d1")), WORLD, { now });
+    now.jump(60_000);
+    const client = fakeClient(novel("d2"));
+    const second = await backupWorld(client, WORLD, { now });
+    expect(client.listManuscriptParts).toHaveBeenCalled();
+    expect(client.getManuscript).toHaveBeenCalledTimes(1);
+    expect(second.manuscripts_unchanged_and_not_walked).toBeUndefined();
+    expect(second.counts["chapters and scenes"]).toBe(2);
+  });
+
+  it("full walks it even when unchanged", async () => {
+    const now = clock();
+    await backupWorld(fakeClient(novel("d1")), WORLD, { now });
+    now.jump(60_000);
+    const client = fakeClient(novel("d1"));
+    const second = await backupWorld(client, WORLD, { now, full: true });
+    expect(client.listManuscriptParts).toHaveBeenCalled();
+    expect(second.manuscripts_unchanged_and_not_walked).toBeUndefined();
+  });
+
+  it("walks it the ordinary way if a file is missing from the previous backup", async () => {
+    const now = clock();
+    const first = await backupWorld(fakeClient(novel("d1")), WORLD, { now });
+    const lost = join(first.folder, "manuscript-parts", "Scene 1 - p2.json");
+    chmodSync(lost, 0o644);
+    rmSync(lost);
+    now.jump(60_000);
+    const client = fakeClient(novel("d1"));
+    const second = await backupWorld(client, WORLD, { now });
+    expect(client.listManuscriptParts).toHaveBeenCalled();
+    expect(existsSync(join(second.folder, "manuscript-parts", "Scene 1 - p2.json"))).toBe(true);
+    expect(second.manuscripts_unchanged_and_not_walked).toBeUndefined();
+  });
+});

@@ -23,6 +23,11 @@
  * - **Unchanged items are not read again.** World Anvil's lists give each
  *   item's last-changed date. An item whose date matches the previous
  *   complete backup is copied from it. `full` reads everything afresh.
+ * - **An untouched manuscript is not walked again.** Changing anything
+ *   inside a manuscript (a scene, a label, a beat) moves the manuscript's
+ *   own change date (seen live 2026-11-13). So when that date matches the
+ *   previous backup, everything inside it is copied forward without asking
+ *   World Anvil for a single list. `full` walks it regardless.
  * - **Every backup is complete in itself.** Copies, not links, so an old
  *   backup can be rotated out without damaging a newer one.
  *
@@ -87,6 +92,8 @@ export const SECTIONS = [
   }),
   s("canvas", "canvases", "canvases", "listCanvases", "getCanvas"),
   s("manuscript", "manuscripts", "manuscripts", "listManuscripts", "getManuscript", {
+    // Its change date moves when anything inside it changes.
+    dateCoversChildren: true,
     children: [
       s("manuscript_version", "manuscript-drafts", "manuscript drafts", "listManuscriptVersions", "getManuscriptVersion", {
         children: [
@@ -287,16 +294,67 @@ export async function backupWorld(client, worldId, opts = {}) {
 
   // ---- what the previous complete backup holds ---------------------------
   const previousName = completeBackups(worldDir).pop() ?? null;
-  const previous = new Map();
+  const previous = new Map(); // items with a change date, by type:id
+  const previousInside = new Map(); // parent type:id -> the items directly inside it
+  let previousNotSaved = [];
   if (previousName && !progress.full) {
     try {
       const manifest = readJson(join(worldDir, previousName, "manifest.json"));
-      for (const item of manifest.items ?? [])
-        if (item.stamp && item.file) previous.set(`${item.type}:${lower(item.id)}`, item);
+      for (const item of manifest.items ?? []) {
+        if (!item.file) continue;
+        if (item.stamp) previous.set(`${item.type}:${lower(item.id)}`, item);
+        if (item.parent?.id) {
+          const key = `${item.parent.type}:${lower(item.parent.id)}`;
+          if (!previousInside.has(key)) previousInside.set(key, []);
+          previousInside.get(key).push(item);
+        }
+      }
+      previousNotSaved = manifest.could_not_be_saved ?? [];
     } catch {
       previous.clear(); // unreadable manifest: read everything
+      previousInside.clear();
+      previousNotSaved = [];
     }
   }
+
+  /**
+   * Copy everything inside an unchanged item from the previous backup.
+   * Returns false, having copied nothing that matters, if any file is
+   * missing: the caller then walks the item the ordinary way.
+   */
+  const carryInside = (top) => {
+    const found = [];
+    const queue = [top];
+    while (queue.length) {
+      const parent = queue.shift();
+      for (const child of previousInside.get(`${parent.type}:${lower(parent.id)}`) ?? []) {
+        if (!BY_TYPE.has(child.type) || !existsSync(join(worldDir, previousName, child.file))) return false;
+        found.push(child);
+        queue.push(child);
+      }
+    }
+    for (const child of found) {
+      const item = { type: child.type, id: child.id, title: child.title, stamp: child.stamp ?? null, parent: child.parent };
+      const key = `${item.type}:${lower(item.id)}`;
+      mkdirSync(join(dir, BY_TYPE.get(item.type).folder), { recursive: true });
+      const target = join(dir, fileOf(item));
+      copyFileSync(join(worldDir, previousName, child.file), target);
+      chmodSync(target, 0o644);
+      if (!known.has(key)) {
+        known.add(key);
+        progress.items.push(item);
+        progress.reused += 1;
+      }
+      savedKeys.add(key);
+    }
+    // What World Anvil refused inside it last time is still not saved: keep saying so.
+    const inside = new Set([top, ...found].map((i) => `${i.type}:${lower(i.id)}`));
+    for (const gap of previousNotSaved)
+      if (gap.of?.id && inside.has(`${gap.of.type}:${lower(gap.of.id)}`) && !progress.not_saved.some((n) => n.what === gap.what && n.of?.id === gap.of.id))
+        progress.not_saved.push(gap);
+    progress.carried = (progress.carried ?? 0) + 1;
+    return true;
+  };
 
   // ---- work until done or out of time ------------------------------------
   const known = new Set(progress.items.map((i) => `${i.type}:${lower(i.id)}`));
@@ -359,15 +417,20 @@ export async function backupWorld(client, worldId, opts = {}) {
       }
       handled += 1;
 
-      // Queue this item's own lists before its file is written, so a call
-      // that stops between the two can't lose them.
-      if (addLists(item.type, item.id)) saveProgress();
-
       const target = join(dir, fileOf(item));
       mkdirSync(join(dir, BY_TYPE.get(item.type).folder), { recursive: true });
       const before = previous.get(`${item.type}:${lower(item.id)}`);
       const source = before ? join(worldDir, previousName, before.file) : null;
-      if (before && item.stamp && before.stamp === item.stamp && existsSync(source)) {
+      const unchanged = Boolean(before && item.stamp && before.stamp === item.stamp && existsSync(source));
+
+      // Queue this item's own lists before its file is written, so a call
+      // that stops between the two can't lose them. An unchanged item whose
+      // date covers what is inside it has that copied forward instead; its
+      // own file is written last, so a call that stops midway does it again.
+      const carried = unchanged && BY_TYPE.get(item.type).dateCoversChildren && carryInside(item);
+      if (carried || addLists(item.type, item.id)) saveProgress();
+
+      if (unchanged) {
         copyFileSync(source, target);
         chmodSync(target, 0o644);
         savedKeys.add(keyOf(item));
@@ -461,6 +524,7 @@ export async function backupWorld(client, worldId, opts = {}) {
     counts,
     read_from_world_anvil: progress.read,
     copied_unchanged_from_previous_backup: progress.reused,
+    ...(progress.carried ? { manuscripts_unchanged_and_not_walked: progress.carried } : {}),
     ...(unsaved.length
       ? {
           could_not_be_saved: progress.not_saved,
