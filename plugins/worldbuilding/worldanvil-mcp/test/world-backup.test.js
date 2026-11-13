@@ -29,7 +29,7 @@ afterEach(() => {
 });
 
 /** A fake world: `articles` and `categories` are {id, title, updateDate, body}. */
-function fakeClient(state, { keep = 5 } = {}) {
+function fakeClient(state, { keep = 5, keepDays = 7 } = {}) {
   const page = (items) => async (_world, { limit, offset }) => ({
     entities: items()
       .slice(Number(offset), Number(offset) + Number(limit))
@@ -43,7 +43,7 @@ function fakeClient(state, { keep = 5 } = {}) {
       return { id, title: found.title, content: found.body };
     });
   const client = {
-    access: { settings: { world_backup_keep: keep } },
+    access: { settings: { world_backup_keep: keep, backup_keep_days: keepDays } },
     backups: { dir },
     getWorld: vi.fn(async (id) => {
       if (state.blocked) throw new Error("'Saga' is blocked in your access settings");
@@ -203,17 +203,102 @@ describe("world backup", () => {
     expect(client.getArticle.mock.calls.map((c) => c[0])).toEqual(["a0000001"]);
   });
 
-  it("keeps only the newest world_backup_keep backups", async () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  /** Take `count` backups `gap` ms apart, each after an edit so each is kept. */
+  const series = async (count, gap, options) => {
+    const state = worldState();
+    const now = clock();
+    const results = [];
+    for (let i = 0; i < count; i++) {
+      state.articles[0] = article(1, `2026-03-${10 + i}`);
+      results.push(await backupWorld(fakeClient(state, options), WORLD, { now }));
+      now.jump(gap);
+    }
+    return results;
+  };
+
+  it("over the limit, the oldest backups go once they are older than backup_keep_days", async () => {
+    const results = await series(4, 8 * DAY, { keep: 2 });
+    expect(results.map((r) => existsSync(r.folder))).toEqual([false, false, true, true]);
+    expect(results[3]).toMatchObject({ backups_held: 2, backup_limit: 2 });
+    expect(results[3].storing).toMatch(/^Storing 2\/2 backups using [\d.]+ (KB|MB)\.$/);
+    // The newest still has every file, though most were copied forward.
+    expect(json(results[3].folder, "articles", "Article 3 - a0000003.json").data.content).toBe("text of 3");
+  });
+
+  it("a backup younger than backup_keep_days is never deleted, and the answer says so", async () => {
+    const results = await series(4, 60_000, { keep: 2 });
+    expect(results.every((r) => r.backup_taken === true)).toBe(true); // never refused for being over
+    expect(results.map((r) => existsSync(r.folder))).toEqual([true, true, true, true]);
+    expect(results[3]).toMatchObject({ backups_held: 4, backup_limit: 2 });
+    expect(results[3].storing).toMatch(
+      /^Your backups have exceeded your set limit of 2; your retention of 7 days has stopped the excess being deleted\. Storing 4\/2 backups using [\d.]+ (KB|MB)\.$/,
+    );
+  });
+
+  it("age alone deletes nothing: within the limit, old backups stay", async () => {
+    const results = await series(3, 100 * DAY, { keep: 3 });
+    expect(results.map((r) => existsSync(r.folder))).toEqual([true, true, true]);
+  });
+
+  it("only the old ones go: young backups over the limit are held", async () => {
+    // Two old backups, then three inside a week; limit 2.
     const state = worldState();
     const now = clock();
     const folders = [];
-    for (let i = 0; i < 4; i++) {
+    const gaps = [30 * DAY, 30 * DAY, 60_000, 60_000, 60_000];
+    for (let i = 0; i < 5; i++) {
+      state.articles[0] = article(1, `2026-04-${10 + i}`);
       folders.push((await backupWorld(fakeClient(state, { keep: 2 }), WORLD, { now })).folder);
-      now.jump(60_000);
+      now.jump(gaps[i]);
     }
-    expect(folders.map((f) => existsSync(f))).toEqual([false, false, true, true]);
-    // The newest still has every file, though most were copied forward.
-    expect(json(folders[3], "articles", "Article 3 - a0000003.json").data.content).toBe("text of 3");
+    expect(folders.map((f) => existsSync(f))).toEqual([false, false, true, true, true]);
+  });
+
+  it("takes no backup when nothing has changed, and says since when", async () => {
+    const state = worldState();
+    const now = clock();
+    const first = await backupWorld(fakeClient(state), WORLD, { now });
+    now.jump(60_000);
+    const client = fakeClient(state);
+    const second = await backupWorld(client, WORLD, { now });
+
+    expect(second).toMatchObject({ done: true, backup_taken: false, checked: 4, last_backup: first.folder, backups_held: 1 });
+    expect(second.note).toMatch(/^No backup taken\. No changes since 2026-11-13T/);
+    expect(second.note).toMatch(/full: true/);
+    expect(second.folder).toBeUndefined();
+    expect(client.getArticle).not.toHaveBeenCalled();
+    expect(readdirSync(join(dir, "worlds", "Saga TestWorld-11111111"))).toHaveLength(1); // no partial left behind
+  });
+
+  it("full takes a backup anyway when nothing has changed", async () => {
+    const state = worldState();
+    const now = clock();
+    await backupWorld(fakeClient(state), WORLD, { now });
+    now.jump(60_000);
+    const second = await backupWorld(fakeClient(state), WORLD, { now, full: true });
+    expect(second).toMatchObject({ done: true, backup_taken: true, backups_held: 2 });
+    expect(existsSync(second.folder)).toBe(true);
+  });
+
+  it("an item removed from the world counts as a change", async () => {
+    const state = worldState();
+    const now = clock();
+    await backupWorld(fakeClient(state), WORLD, { now });
+    now.jump(60_000);
+    state.articles.pop();
+    const second = await backupWorld(fakeClient(state), WORLD, { now });
+    expect(second).toMatchObject({ backup_taken: true, total: 3, read_from_world_anvil: 0 });
+  });
+
+  it("a change to the world's own record counts as a change", async () => {
+    const state = worldState();
+    const now = clock();
+    await backupWorld(fakeClient(state), WORLD, { now });
+    now.jump(60_000);
+    const client = fakeClient(state);
+    client.getWorld = vi.fn(async (id) => ({ id, title: "Saga: Test/World", state: "public" }));
+    expect((await backupWorld(client, WORLD, { now })).backup_taken).toBe(true);
   });
 
   it("notes an item deleted since the list was taken, and still finishes", async () => {
@@ -431,6 +516,11 @@ describe("an untouched manuscript is not walked again", () => {
     },
     failList: { listManuscriptBookmarks: { status: 422, message: "bookmarks broken" } },
   });
+  /** The same world with one article outside the manuscript edited, so a backup is kept. */
+  const edited = (state, n) => {
+    state.articles[0] = article(1, `2026-05-0${n}`);
+    return state;
+  };
   const insideCalls = (client) =>
     ["listManuscriptVersions", "listManuscriptParts", "listManuscriptBeats", "listManuscriptLabels", "listManuscriptTags", "listManuscriptBookmarks", "getManuscript", "getManuscriptVersion", "getManuscriptPart", "getManuscriptBeat", "getManuscriptLabel"]
       .map((m) => client[m].mock.calls.length)
@@ -442,11 +532,11 @@ describe("an untouched manuscript is not walked again", () => {
     expect(first.counts).toMatchObject({ manuscripts: 1, "chapters and scenes": 2, beats: 1, "manuscript labels": 1 });
 
     now.jump(60_000);
-    const client = fakeClient(novel("d1"));
+    const client = fakeClient(edited(novel("d1"), 1)); // an article changed; the manuscript did not
     const second = await backupWorld(client, WORLD, { now });
 
     expect(insideCalls(client)).toBe(0);
-    expect(second).toMatchObject({ done: true, read_from_world_anvil: 0, manuscripts_unchanged_and_not_walked: 1 });
+    expect(second).toMatchObject({ done: true, read_from_world_anvil: 1, manuscripts_unchanged_and_not_walked: 1 });
     expect(second.counts).toEqual(first.counts);
     expect(second.total).toBe(first.total);
     // Stampless pieces (the beat, the label) were copied too, not read.
@@ -463,9 +553,9 @@ describe("an untouched manuscript is not walked again", () => {
     const now = clock();
     await backupWorld(fakeClient(novel("d1")), WORLD, { now });
     now.jump(60_000);
-    await backupWorld(fakeClient(novel("d1")), WORLD, { now });
+    await backupWorld(fakeClient(edited(novel("d1"), 1)), WORLD, { now });
     now.jump(60_000);
-    const client = fakeClient(novel("d1"));
+    const client = fakeClient(edited(novel("d1"), 2));
     const third = await backupWorld(client, WORLD, { now });
     expect(insideCalls(client)).toBe(0);
     expect(third.counts).toMatchObject({ "chapters and scenes": 2, beats: 1, "manuscript labels": 1 });

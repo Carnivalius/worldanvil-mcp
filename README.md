@@ -110,8 +110,10 @@ A JSON file **outside this repository**: `~/.worldanvil-mcp/access.json` by defa
     "allow_delete_worlds": false,
     "new_world_access": "full_edit",
     "item_backup_keep": 10,
-    "world_backup_keep": 5,
-    "allow_blocked_backup": false
+    "world_backup_keep": 20,
+    "backup_keep_days": 7,
+    "allow_blocked_backup": false,
+    "backup_folder": ""
   }
   ```
 
@@ -148,8 +150,10 @@ Every refusal explains why, for example *"Access denied: 'Old Campaign' is read_
 | `allow_create_worlds` | `true` | Offer the create-world tool. The AI must ask you the new world's level first; the world is then added to `world_list` at that level |
 | `allow_delete_worlds` | `false` | Offer the delete-world tool. The world must also be `full_edit`, and it is fully backed up first *(world backups are still being built, so world deletion is currently always refused)* |
 | `new_world_access` | `full_edit` | Suggested level for new worlds |
-| `item_backup_keep` | `10` | Backups kept per item (before-edit / before-delete copies) |
-| `world_backup_keep` | `5` | Full world backups kept per world *(coming soon)* |
+| `item_backup_keep` | `10` | Saved copies kept **per item** (before-edit, before-delete and on-request copies) |
+| `world_backup_keep` | `20` | Full world backups kept **per world** |
+| `backup_keep_days` | `7` | A backup younger than this many days is never removed, even over the two limits above. Can't be set below 7 |
+| `backup_folder` | `""` | Where backups are kept, as a full path. `""` means a `backups` folder next to this settings file. A folder inside a git repository is refused |
 | `allow_blocked_backup` | `false` | Allow full backups of `blocked` worlds to your disk *(coming soon)* |
 
 ### Examples
@@ -191,7 +195,10 @@ Settings you leave out use their defaults.
 - **The server won't start** if the file is invalid: bad JSON (including `True` instead of `true`), an unknown setting or level, a world listed twice, a name matching no world or several (use the world's id instead), `default_access` or `new_world_access` set to `blocked`, or a backup count below 1. It tells you exactly what to fix.
 - **Fail closed:** if the server can't tell which world an item belongs to, the request is refused.
 - **No cross-world changes:** items can't be moved to, or linked with items in, another world.
-- **Backups before every edit or delete:** the item's previous state is saved to `backups/` next to your settings file, dated, read-only, keeping the newest `item_backup_keep` copies per item. If a backup can't be made, the change is refused.
+- **Backups before every edit or delete:** the item's previous state is saved to your backup folder, dated and read-only. If a backup can't be made, the change is refused.
+- **Backups are write-once:** the AI can read them (to list an item's saved versions, search them, compare one with the item now, or restore one item) but no tool can change or delete a backup. Reading follows the access levels: a blocked world's backups can't be read.
+- **Old backups are only removed to make room, and never young ones:** a backup is never refused. After a new one is saved, the oldest are removed only while there are more than the limit, and only those older than `backup_keep_days`. If recent backups put you over the limit, they are all kept and the AI tells you how many are held and how much space they use.
+- **Nothing changed, nothing saved:** asked for a backup when nothing has changed since the last one, the AI says so with the date. Ask for one anyway and it is taken.
 - **Renaming worlds** isn't supported yet.
 - **List worlds** shows every world with its level, including blocked ones (by name only), so a blocked world never looks deleted.
 - **Not offered at all:** account changes, the image library, and subscriber groups (who can see your content).

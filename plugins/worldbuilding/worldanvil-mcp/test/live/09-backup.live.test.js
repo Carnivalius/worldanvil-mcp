@@ -8,7 +8,7 @@
  *
  *   read    Back the test world up (calling again until done), and check
  *           the copy against the world outline. Then back up again: with
- *           nothing changed, nothing should need reading from World Anvil.
+ *           nothing changed, the answer should be "No backup taken".
  *   update  Edit one test article through the tool, back up again, and
  *           check that exactly that article was read again and the copy
  *           holds the new text. This is the proof that World Anvil's
@@ -88,6 +88,11 @@ function setup(stageName) {
     } while (!result.done && calls < 90);
     expect(result.done).toBe(true);
     if (adopted) note(`${adopted} item(s) adopted; the backup carried on after each refusal`);
+    note(`storing: ${result.storing}`);
+    if (result.backup_taken === false) {
+      note(`no backup taken in ${calls} call(s), ${Math.round((Date.now() - started) / 1000)}s: ${result.note}`);
+      return result;
+    }
     note(
       `done in ${calls} call(s), ${Math.round((Date.now() - started) / 1000)}s: ` +
         `${JSON.stringify(result.counts)}, read ${result.read_from_world_anvil}, ` +
@@ -163,14 +168,24 @@ describe.runIf(enabled && stage === "read")("world backup: read", () => {
     expect(copy.data.world?.id).toBeTruthy();
   });
 
-  it("a second backup with nothing changed reads nothing again", async () => {
+  it("a second backup with nothing changed takes no backup and says since when", async () => {
     const second = await ctx.backup();
-    note(`second backup: read ${second.read_from_world_anvil}, copied ${second.copied_unchanged_from_previous_backup}`);
-    expect(second.total).toBe(first.total);
-    expect(second.read_from_world_anvil + second.copied_unchanged_from_previous_backup).toBe(second.total);
-    expect(second.folder).not.toBe(first.folder);
-    // Complete in itself: every file is there, not just the changed ones.
-    expect(json(second.folder, "manifest.json").items.every((i) => existsSync(join(second.folder, i.file)))).toBe(true);
+    // If this fails with backup_taken true, something in the test world has no
+    // usable change date (or the world record itself moves): the result's
+    // read_from_world_anvil says how many items were read again.
+    expect(second.backup_taken, `read again: ${second.read_from_world_anvil}`).toBe(false);
+    expect(second.note).toMatch(/^No backup taken\. No changes since /);
+    expect(second.checked).toBe(first.total);
+    expect(second.last_backup).toBe(first.folder);
+    expect(readdirSync(join(first.folder, "..")).filter((n) => n.endsWith(".partial"))).toEqual([]);
+  });
+
+  it("full takes one anyway, complete in itself", async () => {
+    const forced = await ctx.backup({ full: true });
+    expect(forced.backup_taken).toBe(true);
+    expect(forced.folder).not.toBe(first.folder);
+    expect(forced.total).toBe(first.total);
+    expect(json(forced.folder, "manifest.json").items.every((i) => existsSync(join(forced.folder, i.file)))).toBe(true);
   });
 });
 
@@ -184,7 +199,11 @@ describe.runIf(enabled && stage === "update")("world backup: update", () => {
 
   it("after an edit, exactly the edited article is read again", async () => {
     const id = ctx.h.ledger.live().find((e) => e.path === "/article" && e.title === EDITED).id;
-    const before = await ctx.backup(); // a baseline that already holds everything
+    // A baseline that already holds everything. With nothing changed since
+    // the last backup none is taken, and that last backup is the baseline.
+    const before = await ctx.backup();
+    const baseFolder = before.folder ?? before.last_backup;
+    const baseRead = before.read_from_world_anvil ?? 0;
     const text = `Edited for the backup test at ${new Date().toISOString()}.`;
     await ctx.ok("worldanvil_update_article", { article_id: id, content: text });
 
@@ -192,12 +211,13 @@ describe.runIf(enabled && stage === "update")("world backup: update", () => {
     note(`after one edit: read ${after.read_from_world_anvil}, copied ${after.copied_unchanged_from_previous_backup}`);
     const copy = json(after.folder, json(after.folder, "manifest.json").items.find((i) => i.id === id).file);
     expect(copy.data.content).toContain("Edited for the backup test");
-    const stampBefore = json(before.folder, "manifest.json").items.find((i) => i.id === id)?.stamp;
+    const stampBefore = json(baseFolder, "manifest.json").items.find((i) => i.id === id)?.stamp;
     note(`change date moved on the edit: ${stampBefore !== copy.stamp}`);
     expect(copy.stamp).not.toBe(stampBefore);
     // Items with no change date (some manuscript pieces) are read on every
     // backup, so the baseline is not zero: the edit must add exactly one.
-    expect(after.read_from_world_anvil).toBe(before.read_from_world_anvil + 1);
-    expect(after.copied_unchanged_from_previous_backup).toBe(before.copied_unchanged_from_previous_backup - 1);
+    expect(after.backup_taken).toBe(true);
+    expect(after.read_from_world_anvil).toBe(baseRead + 1);
+    expect(after.read_from_world_anvil + after.copied_unchanged_from_previous_backup).toBe(after.total);
   });
 });

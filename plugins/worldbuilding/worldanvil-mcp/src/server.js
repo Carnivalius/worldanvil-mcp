@@ -101,7 +101,7 @@ export function createServer(config = {}) {
   // and never inside a git repository. Tests and the harness pass their own.
   const dir = backupDir ?? backupFolderFor(settings, file);
   if (dir) console.error(`Backups are kept in: ${dir}`);
-  const backups = dir ? new Backups({ dir, keep: settings.item_backup_keep }) : null;
+  const backups = dir ? new Backups({ dir, keep: settings.item_backup_keep, keepDays: settings.backup_keep_days }) : null;
   guardClient(client, access, backups, config.transport);
 
   // Parse tool group filter (env var or config)

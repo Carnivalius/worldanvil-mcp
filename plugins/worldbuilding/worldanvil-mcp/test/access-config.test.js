@@ -50,7 +50,8 @@ describe("validateSettings", () => {
       allow_delete_worlds: false,
       new_world_access: "full_edit",
       item_backup_keep: 10,
-      world_backup_keep: 5,
+      world_backup_keep: 20,
+      backup_keep_days: 7,
       allow_blocked_backup: false,
       backup_folder: "",
     });
@@ -66,6 +67,8 @@ describe("validateSettings", () => {
     [{ allow_only: "yes" }, /true or false/],
     [{ item_backup_keep: 0 }, /at least 1/],
     [{ world_backup_keep: 2.5 }, /whole number/],
+    [{ backup_keep_days: 6 }, /at least 7/],
+    [{ backup_keep_days: 7.5 }, /at least 7/],
     [{ backup_folder: 7 }, /backup_folder/],
     [{ backup_folder: "backups/here" }, /must be a full path/],
   ];

@@ -91,7 +91,7 @@ describe("backups before changes", () => {
     expect(files(dir)[0]).toMatch(/-delete\.json$/);
   });
 
-  it("keeps only item_backup_keep copies per item", async () => {
+  it("a copy under backup_keep_days old is never pruned, even over item_backup_keep", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
     const c = await connect({ item_backup_keep: 3 }, dir);
     for (let v = 1; v <= 5; v++) {
@@ -99,9 +99,7 @@ describe("backups before changes", () => {
       await c.callTool({ name: "worldanvil_update_article", arguments: { article_id: ARTICLE, content: `v${v + 1}` } });
       await new Promise((r) => setTimeout(r, 5));
     }
-    const kept = files(dir).sort();
-    expect(kept).toHaveLength(3);
-    expect(kept.map((f) => JSON.parse(readFileSync(f, "utf8")).data.content)).toEqual(["text v3", "text v4", "text v5"]);
+    expect(files(dir)).toHaveLength(5);
   });
 
   it("no backup, no change: refuses if the backup read fails", async () => {
@@ -151,6 +149,41 @@ describe("backups before changes", () => {
     await c.callTool({ name: "worldanvil_get_article", arguments: { article_id: ARTICLE } });
     await c.callTool({ name: "worldanvil_create_article", arguments: { title: "New", world_id: WORLD } });
     expect(files(dir)).toHaveLength(0);
+  });
+});
+
+describe("pruning one item's copies", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const item = { worldId: WORLD, worldTitle: "W", path: "/article", id: ARTICLE, action: "update" };
+  /** Save one copy per gap, waiting that long after each; returns what is left. */
+  const run = (keep, gaps) => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
+    let t = Date.parse("2026-11-13T10:00:00Z");
+    const b = new Backups({ dir, keep, keepDays: 7, now: () => t });
+    gaps.forEach((gap, i) => {
+      b.saveItem({ ...item, data: { title: "Hero", content: `v${i + 1}` } });
+      t += gap;
+    });
+    const kept = files(dir).sort().map((f) => JSON.parse(readFileSync(f, "utf8")).data.content);
+    return { kept, report: b.report(join(dir, "items", "W-11111111", "article", `Hero - ${ARTICLE}`)) };
+  };
+
+  it("over the limit, the oldest go once they are older than the day limit", () => {
+    const { kept, report } = run(3, [8 * DAY, 8 * DAY, 8 * DAY, 8 * DAY, 0]);
+    expect(kept).toEqual(["v3", "v4", "v5"]);
+    expect(report).toMatchObject({ backups_held: 3, backup_limit: 3 });
+    expect(report.storing).toMatch(/^Storing 3\/3 backups using/);
+  });
+
+  it("age alone deletes nothing", () => {
+    expect(run(3, [100 * DAY, 100 * DAY, 0]).kept).toEqual(["v1", "v2", "v3"]);
+  });
+
+  it("young copies over the limit are held, and the report says so", () => {
+    const { kept, report } = run(2, [30 * DAY, 1000, 1000, 1000, 0]);
+    // v1 is old and goes; v2..v5 are inside a week, so all four stay.
+    expect(kept).toEqual(["v2", "v3", "v4", "v5"]);
+    expect(report.storing).toMatch(/exceeded your set limit of 2; your retention of 7 days.*Storing 4\/2 backups/);
   });
 });
 

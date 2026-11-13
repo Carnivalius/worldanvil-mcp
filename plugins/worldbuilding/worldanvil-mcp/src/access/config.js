@@ -27,7 +27,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   allow_delete_worlds: false,
   new_world_access: "full_edit",
   item_backup_keep: 10,
-  world_backup_keep: 5,
+  world_backup_keep: 20,
+  // A backup younger than this many days is never pruned, even over the limits above.
+  backup_keep_days: 7,
   allow_blocked_backup: false,
   // Where backups are kept. "" = a "backups" folder beside this settings file.
   backup_folder: "",
@@ -204,6 +206,8 @@ export function validateSettings(raw, file = "settings") {
   for (const key of ["item_backup_keep", "world_backup_keep"])
     if (!Number.isInteger(s[key]) || s[key] < 1)
       throw err(`"${key}" must be a whole number of at least 1`);
+  if (!Number.isInteger(s.backup_keep_days) || s.backup_keep_days < 7)
+    throw err('"backup_keep_days" must be a whole number of at least 7');
 
   if (typeof s.backup_folder !== "string")
     throw err('"backup_folder" must be a folder path in quotes, or "" for the default');

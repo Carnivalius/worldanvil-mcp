@@ -30,6 +30,12 @@
  *   World Anvil for a single list. `full` walks it regardless.
  * - **Every backup is complete in itself.** Copies, not links, so an old
  *   backup can be rotated out without damaging a newer one.
+ * - **Nothing changed, nothing saved.** If every item was copied from the
+ *   previous backup and none was added or removed, the answer is "no
+ *   changes since <date>" and no backup is kept. `full` always saves one.
+ * - **Backups are write-once.** Nothing here edits a finished backup. Old
+ *   ones are pruned by the rule in backup.js: only over world_backup_keep,
+ *   oldest first, and never one younger than backup_keep_days.
  *
  * Everything is read through the guarded client, so a world the access
  * settings don't allow can't be backed up either.
@@ -48,7 +54,7 @@ import {
   writeFileSync,
 } from "fs";
 import { join } from "path";
-import { itemName, safeName, timestamp } from "./backup.js";
+import { itemName, pickExpired, retentionReport, safeName, timestamp } from "./backup.js";
 import { listAll } from "../listing.js";
 
 /** How long one call works before saving its place and returning. */
@@ -127,6 +133,10 @@ const UNDER = new Map([["world", []]]);
   }
 })(SECTIONS, "world");
 
+/** The section for an item type ("article", "manuscript_part", ...), or null. */
+export const sectionOf = (type) => BY_TYPE.get(String(type)) ?? null;
+export const ITEM_TYPES = [...BY_TYPE.keys()];
+
 export const INCLUDED = ["world settings record", ...new Set([...BY_TYPE.values()].map((x) => x.label))];
 
 const lower = (id) => String(id).toLowerCase();
@@ -200,6 +210,23 @@ function completeBackups(worldDir) {
     .sort();
 }
 
+/**
+ * Is the world's own record the same as in the previous backup? By its
+ * change date when it has one, otherwise by its whole content.
+ */
+function sameWorldRecord(current, previousFile) {
+  let before;
+  try {
+    before = readJson(previousFile);
+  } catch {
+    return false;
+  }
+  const a = stampOf(current);
+  const b = stampOf(before);
+  if (a !== null || b !== null) return a === b;
+  return JSON.stringify(current) === JSON.stringify(before);
+}
+
 function partials(worldDir) {
   if (!existsSync(worldDir)) return [];
   return readdirSync(worldDir).filter((n) => n.endsWith(".partial")).sort();
@@ -224,7 +251,8 @@ export async function backupWorld(client, worldId, opts = {}) {
   const backups = client.backups;
   if (!backups?.dir)
     throw new Error("backups aren't configured (no backup folder), so a world backup can't be taken");
-  const keep = client.access?.settings?.world_backup_keep ?? 5;
+  const keep = client.access?.settings?.world_backup_keep ?? 20;
+  const keepDays = client.access?.settings?.backup_keep_days ?? 7;
   const now = opts.now ?? Date.now;
   const budgetMs = opts.budgetMs ?? CALL_BUDGET_MS;
   const startedCall = now();
@@ -297,9 +325,13 @@ export async function backupWorld(client, worldId, opts = {}) {
   const previous = new Map(); // items with a change date, by type:id
   const previousInside = new Map(); // parent type:id -> the items directly inside it
   let previousNotSaved = [];
+  let previousCount = -1;
+  let previousFinished = null;
   if (previousName && !progress.full) {
     try {
       const manifest = readJson(join(worldDir, previousName, "manifest.json"));
+      previousCount = (manifest.items ?? []).length;
+      previousFinished = manifest.finished_at ?? null;
       for (const item of manifest.items ?? []) {
         if (!item.file) continue;
         if (item.stamp) previous.set(`${item.type}:${lower(item.id)}`, item);
@@ -314,6 +346,7 @@ export async function backupWorld(client, worldId, opts = {}) {
       previous.clear(); // unreadable manifest: read everything
       previousInside.clear();
       previousNotSaved = [];
+      previousCount = -1;
     }
   }
 
@@ -480,6 +513,44 @@ export async function backupWorld(client, worldId, opts = {}) {
     };
   }
 
+  /** Every complete backup of this world against the limit, and their size. */
+  const held = () => {
+    const complete = completeBackups(worldDir);
+    const bytes = complete.reduce((sum, name) => sum + sizeOfTree(join(worldDir, name)), 0);
+    return retentionReport({ held: complete.length, keep, keepDays, bytes });
+  };
+
+  // ---- nothing changed since the previous backup: keep nothing new --------
+  // Every item was copied from it (none read, none missing) and the count is
+  // the same, so the two would be identical. `full` never gets here: it
+  // reads everything, so it always saves.
+  if (
+    !progress.full &&
+    previousName &&
+    progress.read === 0 &&
+    progress.missing.length === 0 &&
+    total === previousCount &&
+    saved === total &&
+    sameWorldRecord(readJson(join(dir, "world.json")), join(worldDir, previousName, "world.json"))
+  ) {
+    removeTree(dir);
+    const since = previousFinished ?? previousName;
+    return {
+      done: true,
+      backup_taken: false,
+      world: title,
+      last_backup: join(worldDir, previousName),
+      last_backup_taken: since,
+      checked: total,
+      ...held(),
+      note:
+        `No backup taken. No changes since ${since}: all ${total} items have the same change date ` +
+        "as in that backup, and none was added or removed. If the user wants one anyway, call again " +
+        "with full: true, which reads every item afresh and always saves.",
+      ...(notes.length ? { notes } : {}),
+    };
+  }
+
   // ---- finish: manifest, rename, lock, rotate -----------------------------
   const manifest = {
     format: 2,
@@ -504,8 +575,9 @@ export async function backupWorld(client, worldId, opts = {}) {
   renameSync(dir, finalDir);
   lockTree(finalDir);
 
-  const complete = completeBackups(worldDir);
-  for (const old of complete.slice(0, Math.max(0, complete.length - keep))) removeTree(join(worldDir, old));
+  for (const old of pickExpired(completeBackups(worldDir), { keep, keepDays, now: now() }))
+    removeTree(join(worldDir, old));
+  const retention = held();
 
   if (progress.missing.length)
     notes.push(
@@ -517,6 +589,7 @@ export async function backupWorld(client, worldId, opts = {}) {
     .join(", ");
   return {
     done: true,
+    backup_taken: true,
     world: title,
     folder: finalDir,
     saved,
@@ -535,7 +608,8 @@ export async function backupWorld(client, worldId, opts = {}) {
       : {}),
     not_included: NOT_INCLUDED,
     size_mb: Math.round((sizeOfTree(finalDir) / 1048576) * 100) / 100,
-    backups_kept: Math.min(complete.length, keep),
+    backups_kept: retention.backups_held,
+    ...retention,
     note: `Backup complete: ${summary || "the world is empty"}.`,
     ...(notes.length ? { notes } : {}),
   };

@@ -14,6 +14,7 @@ import {
 } from "./article-templates.js";
 import { listPage, worldOutline } from "./listing.js";
 import { backupWorld } from "./access/world-backup.js";
+import { backupItem, compareBackup, listBackups, restoreItem, searchBackups } from "./access/lookback.js";
 
 /**
  * Article `fields` may only carry template text/number/yes-no values. They
@@ -198,6 +199,21 @@ export async function handleToolCall(name, args, client) {
             restart: args.restart === true,
           }),
         );
+
+      case "worldanvil_backup_item":
+        return jsonResponse(await backupItem(client, args));
+
+      case "worldanvil_list_backups":
+        return jsonResponse(await listBackups(client, args));
+
+      case "worldanvil_search_backups":
+        return jsonResponse(await searchBackups(client, args));
+
+      case "worldanvil_compare_backup":
+        return jsonResponse(await compareBackup(client, args));
+
+      case "worldanvil_restore_item":
+        return jsonResponse(await restoreItem(client, args));
 
       case "worldanvil_delete_world":
         return jsonResponse(await client.deleteWorld(args.world_id));

@@ -18,7 +18,8 @@
  * E.g., 'worldanvil_create_article' → suffix 'article' → group 'content'.
  */
 const GROUP_RESOURCES = {
-  core: ["identity", "worlds", "world"],
+  // "item", "backup" and "backups" are the backup look-back tools.
+  core: ["identity", "worlds", "world", "item", "backup", "backups"],
   content: ["articles", "article", "categories", "category", "world_outline"],
   images: ["images", "image"],
   campaign: [
@@ -138,7 +139,7 @@ for (const [group, resources] of Object.entries(GROUP_RESOURCES)) {
  */
 function getToolGroup(toolName) {
   const resource = toolName.replace(
-    /^worldanvil_(get|list|create|update|delete|backup)_/,
+    /^worldanvil_(get|list|create|update|delete|backup|search|compare|restore)_/,
     "",
   );
   return RESOURCE_TO_GROUP.get(resource) || "core";

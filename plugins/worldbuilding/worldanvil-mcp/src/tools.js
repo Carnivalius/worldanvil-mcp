@@ -75,7 +75,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_backup_world",
       description:
-        "Save a local copy of everything in a world to the user's backup folder: categories, articles, secrets, timelines, maps, notebooks, statblocks, variables, canvases and manuscripts (a world need not have all of these). Take one before making changes to a world. A large world takes several minutes, so each call works for a limited time: if the answer has done: false, call again with the same world_id until it says done: true, and change nothing in the world until then. Items unchanged since the last backup are copied from it rather than read again. If World Anvil refuses one kind of content, the answer has a warning naming what is missing and everything else is still saved. Image files and subscriber groups are not included. Changes nothing on World Anvil.",
+        "Save a local copy of everything in a world to the user's backup folder: categories, articles, secrets, timelines, maps, notebooks, statblocks, variables, canvases and manuscripts (a world need not have all of these). Take one before making changes to a world. A large world takes several minutes, so each call works for a limited time: if the answer has done: false, call again with the same world_id until it says done: true, and change nothing in the world until then. Items unchanged since the last backup are copied from it rather than read again. If nothing at all has changed since the last backup, no new one is kept and the answer says 'No backup taken. No changes since <date>': tell the user that, and only if they ask for one anyway call again with full: true. A backup is never refused for being over the limit; when the answer's `storing` text says the limit is exceeded, pass that on to the user. If World Anvil refuses one kind of content, the answer has a warning naming what is missing and everything else is still saved. Image files and subscriber groups are not included. Changes nothing on World Anvil.",
       inputSchema: {
         type: "object",
         properties: {
@@ -83,7 +83,7 @@ export function getToolDefinitions() {
           full: {
             type: "boolean",
             description:
-              "Read every item from World Anvil, even ones unchanged since the last backup (slower). Default false.",
+              "Read every item from World Anvil afresh and always save a backup, even if nothing seems to have changed (slower). Use when the user asks for a backup anyway. Default false.",
           },
           restart: {
             type: "boolean",
@@ -91,6 +91,109 @@ export function getToolDefinitions() {
           },
         },
         required: ["world_id"],
+      },
+    },
+    {
+      name: "worldanvil_backup_item",
+      description:
+        "Save a local copy of ONE item (an article, a category, a chapter or scene...) to the user's backup folder, when the user asks for it. If the item is the same as its newest saved copy, nothing is saved and the answer says 'No backup taken. No change since <date>': tell the user that, and only if they ask for one anyway call again with force: true. (A copy is saved automatically before every edit or delete, so this is only needed on request.) The answer's `storing` text says how many copies are held against the limit; if it says the limit is exceeded, pass that on. Changes nothing on World Anvil.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            description:
+              "The kind of item, as World Anvil names it: article, category, secret, timeline, history, map, manuscript, manuscript_part (a chapter or scene), and so on",
+          },
+          id: { type: "string", description: "The item's ID" },
+          force: {
+            type: "boolean",
+            description: "Save a copy even if nothing has changed since the newest saved copy. Use when the user asks for a backup anyway. Default false.",
+          },
+        },
+        required: ["type", "id"],
+      },
+    },
+    {
+      name: "worldanvil_list_backups",
+      description:
+        "See what the local backups hold. With only world_id: the world's full backups and how many items have saved copies of their own. With type and id as well: every saved version of that one item, newest first (copies saved before an edit or delete, copies saved on request, and the copy in each world backup). Each version has a `version` text to give to worldanvil_compare_backup or worldanvil_restore_item. Follows the access settings: a blocked world's backups can't be read. Reads local files only; changes nothing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          world_id: { type: "string", description: "The ID of the world" },
+          type: {
+            type: "string",
+            description:
+              "The kind of item, as World Anvil names it: article, category, secret, timeline, history, map, manuscript, manuscript_part (a chapter or scene), and so on",
+          },
+          id: { type: "string", description: "The item's ID (give together with type)" },
+        },
+        required: ["world_id"],
+      },
+    },
+    {
+      name: "worldanvil_search_backups",
+      description:
+        "Search a world's local backups for a piece of text (not case-sensitive), for example to find wording that has gone from an article. Returns the items whose saved copies contain it, with the version, when it was saved and a snippet. Newest copies are searched first. Follows the access settings. Reads local files only; changes nothing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          world_id: { type: "string", description: "The ID of the world" },
+          text: { type: "string", description: "The text to look for (at least two characters)" },
+          type: {
+            type: "string",
+            description: "Only search this kind of item, e.g. article or manuscript_part (optional)",
+          },
+          limit: { type: "number", description: "Most items to return (default 20, at most 50)" },
+        },
+        required: ["world_id", "text"],
+      },
+    },
+    {
+      name: "worldanvil_compare_backup",
+      description:
+        "Compare a saved copy of one item with the item as it is on World Anvil now, field by field. For text it lists the lines that were in the saved copy and are missing now (`lost`) and the lines that are new (`added`). Use it after changing an article to check nothing was lost: with no version it compares against the newest saved copy, which after an edit is the copy saved just before that edit. Changes nothing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            description:
+              "The kind of item, as World Anvil names it: article, category, secret, timeline, history, map, manuscript, manuscript_part (a chapter or scene), and so on",
+          },
+          id: { type: "string", description: "The item's ID" },
+          version: {
+            type: "string",
+            description: "Which saved version to compare with, from worldanvil_list_backups (optional; default the newest)",
+          },
+        },
+        required: ["type", "id"],
+      },
+    },
+    {
+      name: "worldanvil_restore_item",
+      description:
+        "Put ONE existing item back the way a saved copy had it. Call it first WITHOUT confirm: it changes nothing and shows which fields would be put back. Show that to the user, and only if they agree call again with confirm: true. The item as it is now is backed up first, so a restore can itself be undone. It writes text, numbers and yes/no values only: links, lists, privacy and placement are listed as not restored. Works on articles, categories and manuscript chapters/scenes; the item must still exist (a deleted item can't be recreated by this tool). Needs edit access to the world.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            enum: ["article", "category", "manuscript_part"],
+            description: "The kind of item",
+          },
+          id: { type: "string", description: "The item's ID" },
+          version: {
+            type: "string",
+            description: "Which saved version to restore, from worldanvil_list_backups (required; never chosen for you)",
+          },
+          confirm: {
+            type: "boolean",
+            description: "true to make the change, after the user has seen the preview and agreed. Default false (preview only).",
+          },
+        },
+        required: ["type", "id", "version"],
       },
     },
     {
