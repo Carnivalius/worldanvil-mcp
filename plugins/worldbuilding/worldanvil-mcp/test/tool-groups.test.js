@@ -103,8 +103,8 @@ describe("filterTools", () => {
   it("should filter to content group", () => {
     const groups = new Set(["core", "content"]);
     const result = filterTools(ALL_TOOLS, groups);
-    // Core (6) + articles (5) + categories (5) = 16
-    expect(result.length).toBe(16);
+    // Core (6) + articles (5) + world outline (1) + categories (5) = 17
+    expect(result.length).toBe(17);
   });
 
   it("should filter with a preset", () => {

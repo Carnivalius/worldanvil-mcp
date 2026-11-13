@@ -19,7 +19,7 @@
  */
 const GROUP_RESOURCES = {
   core: ["identity", "worlds", "world"],
-  content: ["articles", "article", "categories", "category"],
+  content: ["articles", "article", "categories", "category", "world_outline"],
   images: ["images", "image"],
   campaign: [
     "notebook",

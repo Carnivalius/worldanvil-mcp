@@ -62,10 +62,11 @@ describe("Category handlers", () => {
       const [worldId, options] = client.listCategories.mock.calls[0];
       expect(worldId).toBe("world-1");
       expect(options.offset).toBe(10);
-      expect(options.limit).toBe(25);
+      // Asks for one more than wanted, to learn whether more exist.
+      expect(options.limit).toBe(26);
     });
 
-    it("omits offset/limit when not provided", async () => {
+    it("defaults to the first 50 (asking for 51)", async () => {
       await handleToolCall(
         "worldanvil_list_categories",
         {
@@ -76,7 +77,7 @@ describe("Category handlers", () => {
 
       const [worldId, options] = client.listCategories.mock.calls[0];
       expect(worldId).toBe("world-1");
-      expect(options).toEqual({});
+      expect(options).toEqual({ limit: 51, offset: 0 });
     });
   });
 

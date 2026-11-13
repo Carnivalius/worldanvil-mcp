@@ -90,7 +90,8 @@ export function getToolDefinitions() {
     // ===== ARTICLES =====
     {
       name: "worldanvil_list_articles",
-      description: "List articles in a specific world",
+      description:
+        "List the articles in a world: all of them by default, wherever they are filed, or just one category's. Returns up to 50 at a time; the answer's `paging` says whether there are more and the offset to ask for next. Records are short (title, id, template, icon, state). For the whole world with its category nesting in one answer, use worldanvil_get_world_outline.",
       inputSchema: {
         type: "object",
         properties: {
@@ -98,14 +99,32 @@ export function getToolDefinitions() {
             type: "string",
             description: "The ID of the world to list articles from",
           },
+          category_id: {
+            type: "string",
+            description:
+              'Optional. A category ID lists only that category\'s articles; "uncategorised" lists only the articles in no category. Leave out for every article in the world.',
+          },
           offset: {
             type: "number",
-            description: "Pagination offset (optional)",
+            description:
+              "Where to start, counting from 0. Use the next_offset from the previous answer to get the following page.",
           },
           limit: {
             type: "number",
-            description: "Maximum number of articles to return (optional)",
+            description: "How many to return (default 50, at most 100)",
           },
+        },
+        required: ["world_id"],
+      },
+    },
+    {
+      name: "worldanvil_get_world_outline",
+      description:
+        "The whole world in one answer: the category tree with each category's articles under it, plus the articles in no category. Complete (it pages through World Anvil itself). Each article shows title, id, template, icon and privacy state. Use this to find where things are or to check whether an article already exists before creating one. It makes one request per category, so a world with many categories takes a little while.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          world_id: { type: "string", description: "The ID of the world" },
         },
         required: ["world_id"],
       },
@@ -127,7 +146,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_create_article",
       description:
-        "Create a new article in WorldAnvil. Markdown is automatically converted to BBCode in both the content field AND all template-specific fields. Use the fields parameter to set template-specific fields like localization, manifestation, lawtype (for Law), anatomy, traits (for Species), seeded, authornotes, etc.",
+        "Create a new article in WorldAnvil. It is created private and gets the same icon World Anvil gives that template; the answer's `privacy` confirms it is private. This tool never makes anything public (that is done on the World Anvil website). Markdown is automatically converted to BBCode in both the content field AND all template-specific fields. Use the fields parameter to set template-specific fields like localization, manifestation, lawtype (for Natural Law), anatomy, traits (for Species), seeded, authornotes, etc.",
       inputSchema: {
         type: "object",
         properties: {
@@ -139,7 +158,7 @@ export function getToolDefinitions() {
           template: {
             type: "string",
             description:
-              'The template type for the article. Use "article" for generic articles, or specific types like: law, species, ethnicity, material, document, technology, organization, location, character, item, etc.',
+              "The template, by the name on World Anvil's new-article screen: Generic, Building, Character, Geography, Item, Organization, Species, Vehicle, Settlement, Condition, Conflict, Document, Culture / Ethnicity, Language, Material, Military Formation, Myth, Natural Law, Plot, Profession, Prose, Title, Spell, Technology, Tradition, Session Report, Country, Military, Religion, God/Deity. Default: Generic. An unknown name is refused.",
           },
           content: {
             type: "string",
@@ -149,7 +168,7 @@ export function getToolDefinitions() {
           icon: {
             type: "string",
             description:
-              'FontAwesome or RPG-Awesome icon class (e.g., "fa-solid fa-dragon", "fa-solid fa-scroll", "ra ra-crystal-ball"). See fontawesome.com for icon names.',
+              "Leave out to get the icon World Anvil gives this template. To choose one, give a Font Awesome name in Solid or Duotone style, e.g. \"fa-dragon\" or \"fa-duotone fa-dragon\". \"default\" resets to the template's own icon.",
           },
           fields: {
             type: "object",
@@ -169,7 +188,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_update_article",
       description:
-        "Update an existing article in WorldAnvil. Markdown is automatically converted to BBCode in both the content field AND all template-specific fields passed via the fields parameter.",
+        "Update an existing article in WorldAnvil. Markdown is automatically converted to BBCode in both the content field AND all template-specific fields passed via the fields parameter. Can set a different icon or reset it to the template's own. Cannot change an article's template, except to a variant of the same one (Organization to Country, Military or Religion; Character to God/Deity).",
       inputSchema: {
         type: "object",
         properties: {
@@ -189,7 +208,12 @@ export function getToolDefinitions() {
           icon: {
             type: "string",
             description:
-              'FontAwesome or RPG-Awesome icon class (e.g., "fa-solid fa-dragon", "fa-solid fa-scroll", "ra ra-crystal-ball")',
+              "Leave out to get the icon World Anvil gives this template. To choose one, give a Font Awesome name in Solid or Duotone style, e.g. \"fa-dragon\" or \"fa-duotone fa-dragon\". \"default\" resets to the template's own icon.",
+          },
+          template: {
+            type: "string",
+            description:
+              "Only for switching to a variant of the article's current template: Country, Military or Religion (for an Organization), God/Deity (for a Character). Any other change of template is refused.",
           },
           fields: {
             type: "object",
@@ -224,7 +248,8 @@ export function getToolDefinitions() {
     // ===== CATEGORIES =====
     {
       name: "worldanvil_list_categories",
-      description: "List categories in a specific world",
+      description:
+        "List the categories in a world. Returns up to 50 at a time; the answer's `paging` says whether there are more and the offset to ask for next. For the nesting of categories and their articles, use worldanvil_get_world_outline.",
       inputSchema: {
         type: "object",
         properties: {
@@ -234,11 +259,12 @@ export function getToolDefinitions() {
           },
           offset: {
             type: "number",
-            description: "Pagination offset (optional)",
+            description:
+              "Where to start, counting from 0. Use the next_offset from the previous answer to get the following page.",
           },
           limit: {
             type: "number",
-            description: "Maximum number of categories to return (optional)",
+            description: "How many to return (default 50, at most 100)",
           },
         },
         required: ["world_id"],
@@ -260,7 +286,8 @@ export function getToolDefinitions() {
     },
     {
       name: "worldanvil_create_category",
-      description: "Create a new category in WorldAnvil",
+      description:
+        "Create a new category (a folder for articles) in WorldAnvil. It gets World Anvil's folder icon unless another is given.",
       inputSchema: {
         type: "object",
         properties: {
@@ -272,7 +299,7 @@ export function getToolDefinitions() {
           icon: {
             type: "string",
             description:
-              'FontAwesome or RPG-Awesome icon class (e.g., "fa-solid fa-folder-tree", "fa-solid fa-users")',
+              "Leave out to get World Anvil's folder icon. To choose one, give a Font Awesome name in Solid or Duotone style, e.g. \"fa-users\" or \"fa-duotone fa-users\". \"default\" resets to the folder icon.",
           },
           description: {
             type: "string",
@@ -305,7 +332,7 @@ export function getToolDefinitions() {
           icon: {
             type: "string",
             description:
-              'FontAwesome or RPG-Awesome icon class (e.g., "fa-solid fa-folder-tree", "fa-solid fa-users")',
+              "Leave out to get World Anvil's folder icon. To choose one, give a Font Awesome name in Solid or Duotone style, e.g. \"fa-users\" or \"fa-duotone fa-users\". \"default\" resets to the folder icon.",
           },
           content: {
             type: "string",

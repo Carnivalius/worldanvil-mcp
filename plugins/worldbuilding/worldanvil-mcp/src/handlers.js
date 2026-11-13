@@ -5,6 +5,14 @@
  */
 
 import { markdownToBBCode, convertFieldsToBBCode } from "./utils.js";
+import {
+  CATEGORY_DEFAULT_ICON,
+  metadataWithVariant,
+  resolveIcon,
+  resolveTemplate,
+  templateOfArticle,
+} from "./article-templates.js";
+import { listPage, worldOutline } from "./listing.js";
 
 /**
  * Article `fields` may only carry template text/number/yes-no values. They
@@ -32,6 +40,69 @@ export function sanitizeFields(fields) {
       throw new Error(`field "${key}" must be text, a number or true/false`);
   }
   return convertFieldsToBBCode(fields);
+}
+
+/**
+ * Private by default: a new article must end up private whatever the
+ * world's own setting is. `state: "private"` is sent on create; this checks
+ * it took, corrects it if not, and says plainly if it couldn't.
+ */
+async function confirmArticlePrivate(client, created) {
+  const warn = (why) =>
+    `WARNING: ${why} Check this article's privacy on the World Anvil website.`;
+  try {
+    if (!created?.id) return warn("World Anvil didn't return the new article's id.");
+    let state = created.state;
+    if (state === undefined) state = (await client.getArticle(created.id))?.state;
+    if (state === "private") return "private";
+    await client.updateArticle(created.id, { state: "private" });
+    const after = await client.getArticle(created.id);
+    return after?.state === "private"
+      ? `private (World Anvil created it as "${state}"; set to private straight afterwards)`
+      : warn(`World Anvil created it as "${state}" and it could not be set to private.`);
+  } catch (e) {
+    return warn(`Couldn't confirm it is private (${e.message}).`);
+  }
+}
+
+/**
+ * What to send when an existing article's icon or variant is changed.
+ * Reads the article only when the answer depends on what it is now.
+ */
+async function articleIdentityChanges(client, args) {
+  const changes = {};
+  const wantsDefault =
+    typeof args.icon === "string" && args.icon.trim().toLowerCase() === "default";
+  if (args.template === undefined && !wantsDefault) {
+    if (args.icon !== undefined) changes.icon = resolveIcon(args.icon);
+    return changes;
+  }
+
+  const current = await client.getArticle(args.article_id);
+  let row = templateOfArticle(current);
+  if (args.template !== undefined) {
+    const wanted = resolveTemplate(args.template);
+    const now = row?.siteName ?? current?.templateType ?? "an unknown template";
+    if (!row || wanted.templateType !== row.templateType)
+      throw new Error(
+        `This article is a ${now}. Changing it to ${wanted.siteName} would change its template, ` +
+          "which this tool doesn't do (template fields can be lost). Only a switch to a variant of " +
+          "the same template is supported, e.g. Organization to Country, Military or Religion.",
+      );
+    if (wanted.variant !== row.variant) {
+      if (!wanted.variant)
+        throw new Error(
+          `This article is a ${now}. Turning a variant back into a plain ${wanted.siteName} is not supported yet.`,
+        );
+      changes.articleMetadata = metadataWithVariant(current.articleMetadata, wanted.variant);
+      // Keep the icon in step, unless the writer picked one of their own.
+      if (args.icon === undefined && (!current.icon || current.icon === row.icon))
+        changes.icon = wanted.icon;
+      row = wanted;
+    }
+  }
+  if (args.icon !== undefined) changes.icon = resolveIcon(args.icon, row?.icon);
+  return changes;
 }
 
 /**
@@ -124,27 +195,52 @@ export async function handleToolCall(name, args, client) {
 
       // ===== ARTICLES =====
       case "worldanvil_list_articles": {
-        const options = {};
-        if (args.offset !== undefined) options.offset = args.offset;
-        if (args.limit !== undefined) options.limit = args.limit;
-        return jsonResponse(await client.listArticles(args.world_id, options));
+        // No category = every article in the world, wherever it is filed.
+        let category;
+        if (args.category_id !== undefined && args.category_id !== null && args.category_id !== "") {
+          const wanted = String(args.category_id).trim();
+          category = /^(none|uncategori[sz]ed|-1)$/i.test(wanted) ? { id: "-1" } : { id: wanted };
+        }
+        return jsonResponse(
+          await listPage(
+            (page) => client.listArticles(args.world_id, { ...page, ...(category ? { category } : {}) }),
+            args,
+          ),
+        );
       }
+
+      case "worldanvil_get_world_outline":
+        return jsonResponse(await worldOutline(client, args.world_id));
 
       case "worldanvil_get_article":
         return jsonResponse(await client.getArticle(args.article_id));
 
       case "worldanvil_create_article": {
+        // Refuse an unknown template or icon before anything is sent.
+        const template = resolveTemplate(args.template);
+        const icon =
+          args.icon === undefined ? template.icon : resolveIcon(args.icon, template.icon);
         const data = {
           title: args.title,
           world: { id: args.world_id },
+          templateType: template.templateType,
         };
-        if (args.template !== undefined) data.templateType = args.template;
+        if (template.variant)
+          data.articleMetadata = metadataWithVariant(null, template.variant);
         if (args.content !== undefined)
           data.content = markdownToBBCode(args.content);
-        if (args.icon !== undefined) data.icon = args.icon;
         Object.assign(data, sanitizeFields(args.fields));
+        // After the fields, so nothing in them can override these.
+        data.icon = icon;
+        data.state = "private";
         if (args.category_id) data.category = { id: args.category_id };
-        return jsonResponse(await client.createArticle(data));
+        const created = await client.createArticle(data);
+        return jsonResponse({
+          ...created,
+          template: template.siteName,
+          icon,
+          privacy: await confirmArticlePrivate(client, created),
+        });
       }
 
       case "worldanvil_update_article": {
@@ -152,8 +248,8 @@ export async function handleToolCall(name, args, client) {
         if (args.title !== undefined) data.title = args.title;
         if (args.content !== undefined)
           data.content = markdownToBBCode(args.content);
-        if (args.icon !== undefined) data.icon = args.icon;
         Object.assign(data, sanitizeFields(args.fields));
+        Object.assign(data, await articleIdentityChanges(client, args));
         if (args.category_id) data.category = { id: args.category_id };
         return jsonResponse(await client.updateArticle(args.article_id, data));
       }
@@ -162,14 +258,10 @@ export async function handleToolCall(name, args, client) {
         return jsonResponse(await client.deleteArticle(args.article_id));
 
       // ===== CATEGORIES =====
-      case "worldanvil_list_categories": {
-        const options = {};
-        if (args.offset !== undefined) options.offset = args.offset;
-        if (args.limit !== undefined) options.limit = args.limit;
+      case "worldanvil_list_categories":
         return jsonResponse(
-          await client.listCategories(args.world_id, options),
+          await listPage((page) => client.listCategories(args.world_id, page), args),
         );
-      }
 
       case "worldanvil_get_category":
         return jsonResponse(await client.getCategory(args.category_id));
@@ -179,7 +271,11 @@ export async function handleToolCall(name, args, client) {
           title: args.title,
           world: { id: args.world_id },
         };
-        if (args.icon !== undefined) data.icon = args.icon;
+        // The site gives every new category the folder icon; so does this.
+        data.icon =
+          args.icon === undefined
+            ? CATEGORY_DEFAULT_ICON
+            : resolveIcon(args.icon, CATEGORY_DEFAULT_ICON);
         if (args.description !== undefined)
           data.description = markdownToBBCode(args.description);
         // Field name is `parent` per WA API GET response shape, not `parentCategory`.
@@ -192,7 +288,8 @@ export async function handleToolCall(name, args, client) {
       case "worldanvil_update_category": {
         const data = {};
         if (args.title !== undefined) data.title = args.title;
-        if (args.icon !== undefined) data.icon = args.icon;
+        if (args.icon !== undefined)
+          data.icon = resolveIcon(args.icon, CATEGORY_DEFAULT_ICON);
         // Categories expose two body fields: `description` (legacy, top of page) and
         // `custom1` (column layout). `content` writes custom1 for back-compat;
         // `description` targets the legacy field directly. Pass empty string to clear.

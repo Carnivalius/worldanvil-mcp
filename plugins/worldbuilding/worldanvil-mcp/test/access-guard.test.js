@@ -204,6 +204,22 @@ describe("fail closed", () => {
       /mixes items/,
     );
   });
+  it("lets a list be narrowed by a category in the same world, or by 'no category'", async () => {
+    const list = `/world/articles?id=${W.saga}`;
+    await expect(makeAccess().check(list, "POST", { limit: "50", offset: "0" })).resolves.toMatchObject({ action: "read" });
+    await expect(makeAccess().check(list, "POST", { category: { id: I.category } })).resolves.toMatchObject({ action: "read" });
+    await expect(makeAccess().check(list, "POST", { category: { id: "-1" } })).resolves.toMatchObject({ action: "read" });
+  });
+  it("refuses a list narrowed by a category from another world", async () => {
+    await denied(
+      makeAccess().check(`/world/articles?id=${W.saga}`, "POST", { category: { id: I.campCategory } }),
+      /cross-world lists aren't allowed/,
+    );
+    await denied(
+      makeAccess().check(`/world/articles?id=${W.saga}`, "POST", { mystery: { id: I.category } }),
+      /can't tell which world "mystery" belongs to/,
+    );
+  });
 });
 
 describe("links on a manuscript part (chapter or scene)", () => {

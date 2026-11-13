@@ -271,11 +271,9 @@ export class WorldAnvilClient {
       offset: options.offset !== undefined ? String(options.offset) : "0",
     };
 
-    if (options.category !== undefined) {
-      body.category = options.category;
-    } else {
-      body.category = { id: "-1" };
-    }
+    // No category in the body = every article in the world (Live 2026-11-12).
+    // { id: "-1" } = only the ones in no category; { id } = that category.
+    if (options.category) body.category = options.category;
 
     return this.request(`/world/articles?id=${worldId}`, "POST", body);
   }

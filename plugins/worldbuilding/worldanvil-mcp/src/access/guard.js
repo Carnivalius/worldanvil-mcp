@@ -334,6 +334,18 @@ export class WorldAccess {
       if (!id) throw new AccessError("no id given for the list");
       const worldId = await this.worldOf(list[1], id);
       this.requireAction(worldId, "read");
+      // A list can be narrowed by another item (articles by category). That
+      // item must be in the same world, or the filter would be a way to
+      // read a world the settings don't allow. "-1" is World Anvil's word
+      // for "in no category" and names no item.
+      for (const ref of collectRefs(body, path)) {
+        if (ref.key === "category" && ref.id === "-1") continue;
+        const refWorld = await this.worldOf(ref.path, ref.id);
+        if (refWorld !== worldId)
+          throw new AccessError(
+            `that list mixes items from ${this.label(worldId)} and ${this.label(refWorld)}; cross-world lists aren't allowed`,
+          );
+      }
       return { action, path, id, worldId };
     }
 

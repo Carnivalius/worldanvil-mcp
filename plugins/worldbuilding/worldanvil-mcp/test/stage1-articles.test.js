@@ -1,0 +1,524 @@
+/**
+ * Stage 1: article templates, variants, icons, privacy, listing and the
+ * world outline. Offline: a mock client stands in for World Anvil.
+ */
+
+import { describe, it, expect, vi } from "vitest";
+import { handleToolCall } from "../src/handlers.js";
+import {
+  CATEGORY_DEFAULT_ICON,
+  TEMPLATES,
+  metadataWithVariant,
+  resolveIcon,
+  resolveTemplate,
+  templateOfArticle,
+  variantOf,
+} from "../src/article-templates.js";
+import { listAll, listPage, PROVEN_PAGE } from "../src/listing.js";
+import { getToolDefinitions } from "../src/tools.js";
+
+const parse = (response) => JSON.parse(response.content[0].text);
+const call = async (name, args, client) => {
+  const response = await handleToolCall(name, args, client);
+  if (response.isError) throw new Error(response.content[0].text);
+  return parse(response);
+};
+
+/** What the site was read to give each tile, 2026-11-12. */
+const EXPECTED = [
+  ["Generic", "article", null, "fa-books"],
+  ["Building", "landmark", null, "fa-chart-pyramid"],
+  ["Character", "person", null, "fa-person"],
+  ["Geography", "location", null, "fa-mountain-sun"],
+  ["Item", "item", null, "fa-sword"],
+  ["Organization", "organization", null, "fa-gear"],
+  ["Species", "species", null, "fa-fish-fins"],
+  ["Vehicle", "vehicle", null, "fa-horse-saddle"],
+  ["Settlement", "settlement", null, "fa-building-columns"],
+  ["Condition", "condition", null, "fa-biohazard"],
+  ["Conflict", "militaryConflict", null, "fa-swords"],
+  ["Document", "document", null, "fa-scroll-old"],
+  ["Culture / Ethnicity", "ethnicity", null, "fa-shoe-prints"],
+  ["Language", "language", null, "fa-sign-hanging"],
+  ["Material", "material", null, "fa-coins"],
+  ["Military Formation", "formation", null, "fa-hammer-crash"],
+  ["Myth", "myth", null, "fa-dragon"],
+  ["Natural Law", "law", null, "fa-cloud-bolt"],
+  ["Plot", "plot", null, "fa-staff"],
+  ["Profession", "profession", null, "fa-hammer"],
+  ["Prose", "prose", null, "fa-gem"],
+  ["Title", "rank", null, "fa-crown"],
+  ["Spell", "spell", null, "fa-wand-magic-sparkles"],
+  ["Technology", "technology", null, "fa-vial"],
+  ["Tradition", "ritual", null, "fa-heart"],
+  ["Session Report", "report", null, "fa-book-sparkles"],
+  ["Country", "organization", "country", "fa-fort"],
+  ["Military", "organization", "military", "fa-flag-swallowtail"],
+  ["Religion", "organization", "religion", "fa-ankh"],
+  ["God/Deity", "person", "deity", "fa-omega"],
+];
+
+function articleClient(overrides = {}) {
+  return {
+    createArticle: vi.fn(async (data) => ({ id: "new-1", title: data.title, state: data.state })),
+    updateArticle: vi.fn(async (id, data) => ({ id, ...data })),
+    getArticle: vi.fn(async (id) => ({ id, state: "private" })),
+    createCategory: vi.fn(async (data) => ({ id: "cat-1", ...data })),
+    updateCategory: vi.fn(async (id, data) => ({ id, ...data })),
+    ...overrides,
+  };
+}
+
+describe("template table", () => {
+  it("has the 30 tiles on the site's new-article screen", () => {
+    expect(TEMPLATES).toHaveLength(30);
+    expect(new Set(TEMPLATES.map((t) => t.siteName)).size).toBe(30);
+  });
+
+  it.each(EXPECTED)("%s -> %s (variant %s, icon %s)", (siteName, templateType, variant, icon) => {
+    expect(resolveTemplate(siteName)).toEqual({ siteName, templateType, variant, icon });
+  });
+
+  it("accepts every API name for a plain template", () => {
+    for (const [siteName, templateType, variant] of EXPECTED)
+      if (!variant) expect(resolveTemplate(templateType).siteName).toBe(siteName);
+  });
+
+  it("is forgiving about case, spaces and punctuation", () => {
+    expect(resolveTemplate("character").templateType).toBe("person");
+    expect(resolveTemplate("natural law").templateType).toBe("law");
+    expect(resolveTemplate("Culture/Ethnicity").templateType).toBe("ethnicity");
+    expect(resolveTemplate("god / deity").variant).toBe("deity");
+    expect(resolveTemplate("deity").variant).toBe("deity");
+    expect(resolveTemplate("MILITARYCONFLICT").templateType).toBe("militaryConflict");
+  });
+
+  it("gives Generic when no template is named", () => {
+    expect(resolveTemplate(undefined).templateType).toBe("article");
+  });
+
+  it("refuses an unknown name and lists the valid ones", () => {
+    expect(() => resolveTemplate("kingdom")).toThrow(/not an article template.*Character.*Country/s);
+    expect(() => resolveTemplate(42)).toThrow(/not an article template/);
+  });
+
+  it("recognises an article World Anvil returns", () => {
+    expect(templateOfArticle({ templateType: "person" }).siteName).toBe("Character");
+    expect(templateOfArticle({ entityClass: "MilitaryConflict" }).siteName).toBe("Conflict");
+    expect(
+      templateOfArticle({ templateType: "organization", articleMetadata: '{ "variant": "country" }' }).siteName,
+    ).toBe("Country");
+    // An unknown variant falls back to the base template.
+    expect(
+      templateOfArticle({ templateType: "organization", articleMetadata: '{ "variant": "guild" }' }).siteName,
+    ).toBe("Organization");
+    expect(templateOfArticle({ templateType: "widget" })).toBeNull();
+  });
+
+  it("reads and writes the variant the way the site stores it", () => {
+    expect(metadataWithVariant(null, "country")).toBe('{ "variant": "country" }');
+    expect(variantOf('{ "variant": "country" }')).toBe("country");
+    expect(variantOf("not json")).toBeNull();
+    expect(variantOf(null)).toBeNull();
+    // Anything else already in the metadata is kept.
+    expect(JSON.parse(metadataWithVariant('{"other":1,"variant":"military"}', "religion"))).toEqual({
+      other: 1,
+      variant: "religion",
+    });
+  });
+});
+
+describe("icon argument", () => {
+  it("stores a chosen icon as the site's picker does", () => {
+    expect(resolveIcon("fa-dragon")).toBe("fa-solid fa-dragon");
+    expect(resolveIcon("dragon")).toBe("fa-solid fa-dragon");
+    expect(resolveIcon("fa-solid fa-dragon")).toBe("fa-solid fa-dragon");
+    expect(resolveIcon("fa-duotone fa-wand-magic-sparkles")).toBe("fa-duotone fa-wand-magic-sparkles");
+    expect(resolveIcon("Duotone dragon")).toBe("fa-duotone fa-dragon");
+  });
+
+  it('"default" gives World Anvil\'s own icon', () => {
+    expect(resolveIcon("default", "fa-person")).toBe("fa-person");
+    expect(resolveIcon(" Default ", CATEGORY_DEFAULT_ICON)).toBe("fas fa-folder");
+    expect(() => resolveIcon("default")).toThrow(/Can't tell what the default icon is/);
+  });
+
+  it("refuses anything else, including removing an icon", () => {
+    for (const bad of ["", "   ", null, 7, "ra ra-crystal-ball", "fa-brands fa-github", "<b>", "fa-a b c"])
+      expect(() => resolveIcon(bad, "fa-person")).toThrow(/icon/);
+  });
+
+  it("no tool description still advertises RPG-Awesome icons", () => {
+    expect(JSON.stringify(getToolDefinitions())).not.toMatch(/RPG-Awesome|ra ra-/);
+  });
+});
+
+describe("create article", () => {
+  it("sends the template, its icon and private, and reports them", async () => {
+    const client = articleClient();
+    const result = await call(
+      "worldanvil_create_article",
+      { title: "Aldric", world_id: "w1", template: "Character" },
+      client,
+    );
+    expect(client.createArticle).toHaveBeenCalledWith({
+      title: "Aldric",
+      world: { id: "w1" },
+      templateType: "person",
+      icon: "fa-person",
+      state: "private",
+    });
+    expect(result).toMatchObject({ template: "Character", icon: "fa-person", privacy: "private" });
+    expect(client.updateArticle).not.toHaveBeenCalled();
+  });
+
+  it("defaults to a Generic article", async () => {
+    const client = articleClient();
+    await call("worldanvil_create_article", { title: "Primer", world_id: "w1" }, client);
+    expect(client.createArticle.mock.calls[0][0]).toMatchObject({ templateType: "article", icon: "fa-books" });
+  });
+
+  it("creates a variant as its base template plus metadata", async () => {
+    const client = articleClient();
+    await call("worldanvil_create_article", { title: "Valdor", world_id: "w1", template: "Country" }, client);
+    expect(client.createArticle.mock.calls[0][0]).toMatchObject({
+      templateType: "organization",
+      articleMetadata: '{ "variant": "country" }',
+      icon: "fa-fort",
+    });
+  });
+
+  it("uses a chosen icon instead of the default", async () => {
+    const client = articleClient();
+    await call(
+      "worldanvil_create_article",
+      { title: "Wyrm", world_id: "w1", template: "Species", icon: "fa-duotone fa-dragon" },
+      client,
+    );
+    expect(client.createArticle.mock.calls[0][0].icon).toBe("fa-duotone fa-dragon");
+  });
+
+  it("refuses an unknown template or icon before anything is sent", async () => {
+    const client = articleClient();
+    const bad = await handleToolCall(
+      "worldanvil_create_article",
+      { title: "X", world_id: "w1", template: "kingdom" },
+      client,
+    );
+    expect(bad.isError).toBe(true);
+    const badIcon = await handleToolCall(
+      "worldanvil_create_article",
+      { title: "X", world_id: "w1", icon: "ra ra-sword" },
+      client,
+    );
+    expect(badIcon.isError).toBe(true);
+    expect(client.createArticle).not.toHaveBeenCalled();
+  });
+
+  it("still can't be made public or re-iconed through fields", async () => {
+    const client = articleClient();
+    const res = await handleToolCall(
+      "worldanvil_create_article",
+      { title: "X", world_id: "w1", fields: { state: "public" } },
+      client,
+    );
+    expect(res.isError).toBe(true);
+    expect(client.createArticle).not.toHaveBeenCalled();
+
+    await call("worldanvil_create_article", { title: "Y", world_id: "w1", fields: { icon: "fa-x" } }, client);
+    expect(client.createArticle.mock.calls[0][0].icon).toBe("fa-books");
+  });
+
+  it("reads the article back when the create answer doesn't say its state", async () => {
+    const client = articleClient({ createArticle: vi.fn(async () => ({ id: "new-1" })) });
+    const result = await call("worldanvil_create_article", { title: "A", world_id: "w1" }, client);
+    expect(client.getArticle).toHaveBeenCalledWith("new-1");
+    expect(result.privacy).toBe("private");
+  });
+
+  it("sets it private straight away if World Anvil made it public", async () => {
+    let state = "public";
+    const client = articleClient({
+      createArticle: vi.fn(async () => ({ id: "new-1", state })),
+      updateArticle: vi.fn(async () => {
+        state = "private";
+        return {};
+      }),
+      getArticle: vi.fn(async (id) => ({ id, state })),
+    });
+    const result = await call("worldanvil_create_article", { title: "A", world_id: "w1" }, client);
+    expect(client.updateArticle).toHaveBeenCalledWith("new-1", { state: "private" });
+    expect(result.privacy).toMatch(/^private \(World Anvil created it as "public"/);
+  });
+
+  it("warns plainly if it can't be made private", async () => {
+    const stuck = articleClient({
+      createArticle: vi.fn(async () => ({ id: "new-1", state: "public" })),
+      getArticle: vi.fn(async (id) => ({ id, state: "public" })),
+    });
+    expect((await call("worldanvil_create_article", { title: "A", world_id: "w1" }, stuck)).privacy).toMatch(
+      /^WARNING: World Anvil created it as "public" and it could not be set to private/,
+    );
+
+    const failing = articleClient({
+      createArticle: vi.fn(async () => ({ id: "new-1", state: "public" })),
+      updateArticle: vi.fn(async () => {
+        throw new Error("refused");
+      }),
+    });
+    const result = await call("worldanvil_create_article", { title: "A", world_id: "w1" }, failing);
+    expect(result.privacy).toMatch(/^WARNING: Couldn't confirm it is private \(refused\)/);
+    expect(result.id).toBe("new-1"); // the article was still created, and says so
+  });
+});
+
+describe("update article: icon and variant", () => {
+  const existing = (article) =>
+    articleClient({ getArticle: vi.fn(async (id) => ({ id, ...article })) });
+
+  it("sets a chosen icon without reading the article first", async () => {
+    const client = existing({});
+    await call("worldanvil_update_article", { article_id: "a1", icon: "fa-crown" }, client);
+    expect(client.getArticle).not.toHaveBeenCalled();
+    expect(client.updateArticle).toHaveBeenCalledWith("a1", { icon: "fa-solid fa-crown" });
+  });
+
+  it('"default" resets to the template\'s icon', async () => {
+    const client = existing({ templateType: "person", icon: "fa-solid fa-crown" });
+    await call("worldanvil_update_article", { article_id: "a1", icon: "default" }, client);
+    expect(client.updateArticle).toHaveBeenCalledWith("a1", { icon: "fa-person" });
+  });
+
+  it('"default" on a variant resets to the variant\'s icon', async () => {
+    const client = existing({
+      templateType: "organization",
+      articleMetadata: '{ "variant": "religion" }',
+      icon: "",
+    });
+    await call("worldanvil_update_article", { article_id: "a1", icon: "default" }, client);
+    expect(client.updateArticle).toHaveBeenCalledWith("a1", { icon: "fa-ankh" });
+  });
+
+  it("refuses a reset when the template is unknown", async () => {
+    const client = existing({ templateType: "widget" });
+    const res = await handleToolCall("worldanvil_update_article", { article_id: "a1", icon: "default" }, client);
+    expect(res.isError).toBe(true);
+    expect(client.updateArticle).not.toHaveBeenCalled();
+  });
+
+  it("switches to a variant and moves the default icon with it", async () => {
+    const client = existing({ templateType: "organization", icon: "fa-gear" });
+    await call("worldanvil_update_article", { article_id: "a1", template: "Country" }, client);
+    expect(client.updateArticle).toHaveBeenCalledWith("a1", {
+      articleMetadata: '{ "variant": "country" }',
+      icon: "fa-fort",
+    });
+  });
+
+  it("keeps an icon the writer picked when the variant changes", async () => {
+    const client = existing({ templateType: "organization", icon: "fa-solid fa-dragon" });
+    await call("worldanvil_update_article", { article_id: "a1", template: "Religion" }, client);
+    expect(client.updateArticle).toHaveBeenCalledWith("a1", { articleMetadata: '{ "variant": "religion" }' });
+  });
+
+  it("refuses a change to a different template", async () => {
+    const client = existing({ templateType: "person", icon: "fa-person" });
+    const res = await handleToolCall("worldanvil_update_article", { article_id: "a1", template: "Country" }, client);
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/This article is a Character/);
+    expect(client.updateArticle).not.toHaveBeenCalled();
+  });
+
+  it("refuses turning a variant back into the plain template", async () => {
+    const client = existing({ templateType: "organization", articleMetadata: '{ "variant": "country" }' });
+    const res = await handleToolCall(
+      "worldanvil_update_article",
+      { article_id: "a1", template: "Organization" },
+      client,
+    );
+    expect(res.isError).toBe(true);
+    expect(client.updateArticle).not.toHaveBeenCalled();
+  });
+
+  it("naming the template it already is changes nothing", async () => {
+    const client = existing({ templateType: "person", icon: "fa-person" });
+    await call("worldanvil_update_article", { article_id: "a1", template: "Character", title: "T" }, client);
+    expect(client.updateArticle).toHaveBeenCalledWith("a1", { title: "T" });
+  });
+});
+
+describe("category icons", () => {
+  it("a new category gets the site's folder icon", async () => {
+    const client = articleClient();
+    await call("worldanvil_create_category", { title: "People", world_id: "w1" }, client);
+    expect(client.createCategory.mock.calls[0][0].icon).toBe("fas fa-folder");
+  });
+
+  it("a chosen icon is used, and default resets it", async () => {
+    const client = articleClient();
+    await call("worldanvil_create_category", { title: "People", world_id: "w1", icon: "fa-users" }, client);
+    expect(client.createCategory.mock.calls[0][0].icon).toBe("fa-solid fa-users");
+    await call("worldanvil_update_category", { category_id: "c1", icon: "default" }, client);
+    expect(client.updateCategory.mock.calls[0][1].icon).toBe("fas fa-folder");
+  });
+
+  it("an update without an icon leaves the icon alone", async () => {
+    const client = articleClient();
+    await call("worldanvil_update_category", { category_id: "c1", title: "T" }, client);
+    expect(client.updateCategory.mock.calls[0][1]).not.toHaveProperty("icon");
+  });
+});
+
+/** A fake list endpoint over `total` items, optionally capped per call. */
+function fakeList(total, cap = Infinity) {
+  const items = Array.from({ length: total }, (_, i) => ({ id: `id-${i}`, title: `Item ${i}` }));
+  return vi.fn(async ({ limit, offset }) => ({
+    success: true,
+    entities: items.slice(Number(offset), Number(offset) + Math.min(Number(limit), cap)),
+  }));
+}
+
+describe("paging", () => {
+  it("75 items: 50 and 'more', then the other 25 and 'end'", async () => {
+    const fetch = fakeList(75);
+    const first = await listPage(fetch, {});
+    expect(first.entities).toHaveLength(50);
+    expect(first.paging).toMatchObject({ returned: 50, offset: 0, more: true, next_offset: 50 });
+    expect(first.paging.note).toMatch(/Call again with offset 50/);
+
+    const second = await listPage(fetch, { offset: first.paging.next_offset });
+    expect(second.entities).toHaveLength(25);
+    expect(second.entities[0].id).toBe("id-50"); // not the first 50 again
+    expect(second.paging).toMatchObject({ returned: 25, more: false, next_offset: null });
+    expect(second.paging.note).toMatch(/end of the list/);
+  });
+
+  it("exactly one page: says it is the end", async () => {
+    const page = await listPage(fakeList(50), {});
+    expect(page.entities).toHaveLength(50);
+    expect(page.paging.more).toBe(false);
+  });
+
+  it("a short list costs one request", async () => {
+    const fetch = fakeList(5);
+    const page = await listPage(fetch, {});
+    expect(page.paging).toMatchObject({ returned: 5, more: false });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("still gets it right if World Anvil quietly caps a page", async () => {
+    // Ask for 100 (+1), but the far end only ever returns 60 at a time.
+    const fetch = fakeList(110, 60);
+    const first = await listPage(fetch, { limit: 100 });
+    expect(first.entities).toHaveLength(60);
+    expect(first.paging).toMatchObject({ more: true, next_offset: 60 });
+    const second = await listPage(fetch, { limit: 100, offset: 60 });
+    expect(second.entities).toHaveLength(50);
+    expect(second.entities[0].id).toBe("id-60");
+    expect(second.paging.more).toBe(false);
+    expect(PROVEN_PAGE).toBeLessThanOrEqual(60);
+  });
+
+  it("past the end: empty, and says so", async () => {
+    const page = await listPage(fakeList(10), { offset: 50 });
+    expect(page.entities).toEqual([]);
+    expect(page.paging.note).toMatch(/list ended before it/);
+  });
+
+  it("caps limit at 100 and refuses nonsense", async () => {
+    const fetch = fakeList(300);
+    expect((await listPage(fetch, { limit: 500 })).entities).toHaveLength(100);
+    await expect(listPage(fetch, { limit: 0 })).rejects.toThrow(/limit/);
+    await expect(listPage(fetch, { limit: 2.5 })).rejects.toThrow(/limit/);
+    await expect(listPage(fetch, { offset: -1 })).rejects.toThrow(/offset/);
+    await expect(listPage(fetch, { offset: "abc" })).rejects.toThrow(/offset/);
+  });
+
+  it("listAll collects every page and stops on a repeat", async () => {
+    expect(await listAll(fakeList(123))).toHaveLength(123);
+    expect(await listAll(fakeList(0))).toEqual([]);
+    const stuck = vi.fn(async () => ({ entities: [{ id: "same" }] }));
+    expect(await listAll(stuck)).toHaveLength(1);
+    expect(stuck).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("list articles", () => {
+  const listing = () => {
+    const client = { listArticles: vi.fn(async () => ({ success: true, entities: [{ id: "a" }] })) };
+    return client;
+  };
+
+  it("lists the whole world by default: no category is sent", async () => {
+    const client = listing();
+    const result = await call("worldanvil_list_articles", { world_id: "w1" }, client);
+    expect(client.listArticles).toHaveBeenCalledWith("w1", { limit: 51, offset: 0 });
+    expect(result.paging.more).toBe(false);
+  });
+
+  it("lists one category when asked", async () => {
+    const client = listing();
+    await call("worldanvil_list_articles", { world_id: "w1", category_id: "cat-9", limit: 10, offset: 20 }, client);
+    expect(client.listArticles).toHaveBeenCalledWith("w1", { limit: 11, offset: 20, category: { id: "cat-9" } });
+  });
+
+  it.each(["uncategorised", "Uncategorized", "none", "-1"])('"%s" lists the uncategorised ones', async (word) => {
+    const client = listing();
+    await call("worldanvil_list_articles", { world_id: "w1", category_id: word }, client);
+    expect(client.listArticles.mock.calls[0][1].category).toEqual({ id: "-1" });
+  });
+});
+
+describe("world outline", () => {
+  it("nests categories and files each article once", async () => {
+    const articles = [
+      { id: "A1", title: "Aldric", entityClass: "Person", icon: "fa-person", state: "private", isDraft: true },
+      { id: "A2", title: "Thronehold", entityClass: "Settlement", icon: "fa-building-columns", state: "private", isDraft: false },
+      { id: "A3", title: "Loose note", entityClass: "Article", icon: null, state: "public", isDraft: true },
+    ];
+    const categories = {
+      c1: { id: "c1", title: "Valdor", icon: "fas fa-folder", parent: null, articles: [{ id: "a2", title: "Thronehold" }] },
+      c2: { id: "c2", title: "People", icon: null, parent: { id: "C1" }, articles: [{ id: "A1" }, { id: "gone", title: "Ghost" }] },
+    };
+    const page = (items) => async (_world, { limit, offset }) => ({
+      entities: items.slice(Number(offset), Number(offset) + Number(limit)),
+    });
+    const client = {
+      listCategories: vi.fn(page([{ id: "c1", title: "Valdor" }, { id: "c2", title: "People" }])),
+      listArticles: vi.fn(page(articles)),
+      getCategory: vi.fn(async (id) => categories[id]),
+    };
+
+    const outline = await call("worldanvil_get_world_outline", { world_id: "w1" }, client);
+
+    expect(outline.totals).toEqual({ categories: 2, articles: 3, uncategorised: 1 });
+    expect(outline.categories).toHaveLength(1);
+    const valdor = outline.categories[0];
+    expect(valdor).toMatchObject({ id: "c1", title: "Valdor", icon: "fas fa-folder" });
+    expect(valdor.articles).toEqual([
+      { id: "A2", title: "Thronehold", template: "Settlement", icon: "fa-building-columns", state: "private", draft: false },
+    ]);
+    const people = valdor.categories[0];
+    expect(people.title).toBe("People");
+    expect(people.articles[0]).toMatchObject({ id: "A1", template: "Character" });
+    // Listed by the category but not by the world: still shown, with what is known.
+    expect(people.articles[1]).toMatchObject({ id: "gone", title: "Ghost", template: null });
+    expect(outline.uncategorised).toEqual([
+      { id: "A3", title: "Loose note", template: "Generic", icon: null, state: "public", draft: true },
+    ]);
+    // The whole-world article list is asked for without a category.
+    expect(client.listArticles.mock.calls[0][1]).not.toHaveProperty("category");
+    expect(client.getCategory).toHaveBeenCalledTimes(2);
+  });
+
+  it("a category whose parent isn't in the list sits at the top", async () => {
+    const client = {
+      listCategories: vi.fn(async (_w, { offset }) => ({ entities: offset ? [] : [{ id: "c1", title: "Orphan" }] })),
+      listArticles: vi.fn(async () => ({ entities: [] })),
+      getCategory: vi.fn(async () => ({ id: "c1", title: "Orphan", parent: { id: "missing" } })),
+    };
+    const outline = await call("worldanvil_get_world_outline", { world_id: "w1" }, client);
+    expect(outline.categories.map((c) => c.title)).toEqual(["Orphan"]);
+    expect(outline.categories[0].articles).toEqual([]);
+  });
+});
