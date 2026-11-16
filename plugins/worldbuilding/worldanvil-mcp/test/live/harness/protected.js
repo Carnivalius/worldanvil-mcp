@@ -57,6 +57,27 @@ export function extractUuids(...values) {
 }
 
 /**
+ * A heading's anchor in article text, exactly as World Anvil's editor
+ * writes it: "[h2|<uuid>]" (or "[h|<uuid>]"). The uuid names a place on
+ * the page; it cannot address any item on World Anvil.
+ */
+const HEADING_ANCHOR_RE =
+  /\[h[1-6]?\|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]/gi;
+
+/**
+ * UUIDs that could refer to an item: every UUID except one written only
+ * as a heading anchor (agreed 2026-11-14). Nothing else is excused: the
+ * same id anywhere outside a heading tag still counts, and the
+ * protected-world check (extractTokens) still sees anchors too.
+ */
+export function extractReferenceUuids(...values) {
+  const ids = new Set();
+  for (const text of collectStrings(values))
+    for (const m of text.replace(HEADING_ANCHOR_RE, "[h]").match(UUID_RE) || []) ids.add(m.toLowerCase());
+  return ids;
+}
+
+/**
  * Return a description of the first protected reference found, or null.
  *
  * @param {Set<string>} tokens - from extractTokens()

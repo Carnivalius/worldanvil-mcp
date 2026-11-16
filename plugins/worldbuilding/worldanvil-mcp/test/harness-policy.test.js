@@ -166,6 +166,39 @@ describe("creates", () => {
       body: { title: "MCP-TEST-p", version: { id: TEST_MS }, image: { id: STRANGER } },
     }, c);
   });
+  describe("heading anchors in article text", () => {
+    const article = (content, extra = {}) => ({
+      method: "PUT",
+      endpoint: "/article",
+      body: { title: "MCP-TEST-a", world: { id: TEST_WORLD }, content, ...extra },
+    });
+    it("an unknown id written only as a heading anchor is not a reference", () => {
+      allowed(article(`[h2|${STRANGER}]Overview[/h2]\n[p]Text[/p]\n[h|${STRANGER}]Title[/h]`), c);
+    });
+    it("the same id anywhere else in the text is still refused", () => {
+      refused(article(`[h2|${STRANGER}]Overview[/h2]\n[p]see ${STRANGER}[/p]`), c);
+      refused(article(`@[Someone](Article:${STRANGER})`), c);
+      refused(article(`[h2|${STRANGER}]x[/h2]`, { category: { id: STRANGER } }), c);
+    });
+    it("only the exact heading form is excused", () => {
+      for (const text of [`[h7|${STRANGER}]`, `[h2:${STRANGER}]`, `[h2| ${STRANGER}]`, `[img|${STRANGER}]`, `[h2|x${STRANGER}]`, `h2|${STRANGER}`])
+        refused(article(text), c);
+    });
+    it("an anchor does not count as the ledger parent a create needs", () => {
+      refused({ method: "PUT", endpoint: "/article", body: { title: "MCP-TEST-a", content: `[h2|${STRANGER}]x[/h2]` } }, c);
+    });
+    it("a protected world's id is refused even as a heading anchor, and aborts", () => {
+      let err;
+      try {
+        evaluateRequest(article(`[h2|${REAL_WORLD}]Overview[/h2]`), ctx(c));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(GuardError);
+      expect(err.abort).toBe(true);
+    });
+  });
+
   it("world creation needs explicit opt-in and is capped at two", () => {
     const req = { method: "PUT", endpoint: "/world", body: { title: "MCP-TEST-SCRATCH" } };
     refused(req, c);

@@ -9,7 +9,7 @@
 import {
   TEST_PREFIX,
   extractTokens,
-  extractUuids,
+  extractReferenceUuids,
   findProtectedReference,
 } from "./protected.js";
 
@@ -90,8 +90,9 @@ export function evaluateRequest(req, ctx) {
     throw new GuardError(`${kind} is not allowed in stage "${ctx.stage}"`);
 
   // 3. Every UUID in the body must be a ledger item (or the account itself).
+  //    The one exception: a heading anchor in article text, "[h2|<uuid>]".
   const known = (id) => ctx.ledgerIds.has(id) || id === ctx.userId;
-  for (const id of extractUuids(req.body))
+  for (const id of extractReferenceUuids(req.body))
     if (!known(id))
       throw new GuardError(`body references ${id}, which is not in the ledger`);
 
@@ -119,7 +120,7 @@ export function evaluateRequest(req, ctx) {
         throw new GuardError("at most two test worlds may exist at once");
       return { kind, path, targetId };
     }
-    if (extractUuids(req.body).size === 0)
+    if (extractReferenceUuids(req.body).size === 0)
       throw new GuardError("create must reference a ledger parent");
     return { kind, path, targetId };
   }

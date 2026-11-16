@@ -484,8 +484,7 @@ describe("History handlers", () => {
       );
 
       const [, payload] = client.updateHistory.mock.calls[0];
-      expect(payload.fullcontent).toContain("[h2]Updated[/h2]");
-      expect(payload.fullcontent).toContain("[li]item[/li]");
+      expect(payload.fullcontent).toMatch(/^\[h2\|[0-9a-f-]{36}\]Updated\[\/h2\]\n\[ul\]\n- item\n\[\/ul\]$/);
     });
 
     it("converts linked entity IDs on update", async () => {

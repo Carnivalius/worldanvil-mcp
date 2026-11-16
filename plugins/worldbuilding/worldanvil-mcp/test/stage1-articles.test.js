@@ -229,6 +229,66 @@ describe("create article", () => {
     expect(client.createArticle.mock.calls[0][0].icon).toBe("fa-books");
   });
 
+  it("writes the main text as paragraphs and keeps author notes apart", async () => {
+    const client = articleClient();
+    await call(
+      "worldanvil_create_article",
+      {
+        title: "Example Place",
+        world_id: "w1",
+        content: "An **ancient** being.\n\n- bound\n- patient",
+        author_notes: "SECRET: he is the library's power.\nTO DEVELOP: his escape.",
+      },
+      client,
+    );
+    const sent = client.createArticle.mock.calls[0][0];
+    expect(sent.content).toBe("[p]An [b]ancient[/b] being.[/p]\n[ul]\n- bound\n- patient\n[/ul]");
+    expect(sent.authornotes).toBe("[p]SECRET: he is the library's power.[br]TO DEVELOP: his escape.[/p]");
+  });
+
+  it("leaves a one-line author note bare, and sends none when none is given", async () => {
+    const client = articleClient();
+    await call("worldanvil_create_article", { title: "A", world_id: "w1", content: "Text", author_notes: "CANON: one place." }, client);
+    expect(client.createArticle.mock.calls[0][0].authornotes).toBe("CANON: one place.");
+    await call("worldanvil_create_article", { title: "B", world_id: "w1", content: "Text" }, client);
+    expect("authornotes" in client.createArticle.mock.calls[1][0]).toBe(false);
+  });
+
+  it('format "bbcode" sends content and author notes exactly as written', async () => {
+    const client = articleClient();
+    const content = "# not converted\n**nor this**";
+    await call("worldanvil_create_article", { title: "A", world_id: "w1", content, author_notes: "*as is*", format: "bbcode" }, client);
+    const sent = client.createArticle.mock.calls[0][0];
+    expect(sent.content).toBe(content);
+    expect(sent.authornotes).toBe("*as is*");
+  });
+
+  it("refuses an unknown format before anything is sent", async () => {
+    const client = articleClient();
+    const res = await handleToolCall("worldanvil_create_article", { title: "A", world_id: "w1", content: "x", format: "html" }, client);
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/format must be "markdown" or "bbcode"/);
+    expect(client.createArticle).not.toHaveBeenCalled();
+  });
+
+  it("the author_notes entry wins over one passed through fields", async () => {
+    const client = articleClient();
+    await call(
+      "worldanvil_create_article",
+      { title: "A", world_id: "w1", author_notes: "from the entry", fields: { authornotes: "from fields" } },
+      client,
+    );
+    expect(client.createArticle.mock.calls[0][0].authornotes).toBe("from the entry");
+  });
+
+  it("an update changes only what is passed: notes alone leave the main text out", async () => {
+    const client = articleClient();
+    await call("worldanvil_update_article", { article_id: "a1", author_notes: "TO DEVELOP: her name." }, client);
+    expect(client.updateArticle).toHaveBeenCalledWith("a1", { authornotes: "TO DEVELOP: her name." });
+    await call("worldanvil_update_article", { article_id: "a1", content: "New text." }, client);
+    expect(client.updateArticle).toHaveBeenLastCalledWith("a1", { content: "[p]New text.[/p]" });
+  });
+
   it("reads the article back when the create answer doesn't say its state", async () => {
     const client = articleClient({ createArticle: vi.fn(async () => ({ id: "new-1" })) });
     const result = await call("worldanvil_create_article", { title: "A", world_id: "w1" }, client);

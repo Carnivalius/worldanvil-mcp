@@ -270,7 +270,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_create_article",
       description:
-        "Create a new article in WorldAnvil. It is created private and gets the same icon World Anvil gives that template; the answer's `privacy` confirms it is private. This tool never makes anything public (that is done on the World Anvil website). Markdown is automatically converted to BBCode in both the content field AND all template-specific fields. Use the fields parameter to set template-specific fields like localization, manifestation, lawtype (for Natural Law), anatomy, traits (for Species), seeded, authornotes, etc.",
+        "Create a new article in WorldAnvil. It is created private and gets the same icon World Anvil gives that template; the answer's `privacy` confirms it is private. This tool never makes anything public (that is done on the World Anvil website). Put the lore in content and working notes in author_notes. Markdown in content, author_notes and all template-specific fields is converted to the BBCode World Anvil's own editor writes (paragraphs, headings, lists, quotes, tables, links); BBCode already in the text is left as it is. Use the fields parameter to set template-specific fields like localization, manifestation, lawtype (for Natural Law), anatomy, traits (for Species), seeded, authornotes, etc.",
       inputSchema: {
         type: "object",
         properties: {
@@ -287,7 +287,18 @@ export function getToolDefinitions() {
           content: {
             type: "string",
             description:
-              "The main content/intro of the article (markdown auto-converted to BBCode)",
+              "The main text of the article (markdown auto-converted to BBCode). No table of contents is added unless asked for: to have one, put [articletoc] on a line of its own where it should appear (World Anvil builds the list from the headings and keeps it current). It has no title of its own; add a line above it if the user wants one.",
+          },
+          format: {
+            type: "string",
+            enum: ["markdown", "bbcode"],
+            description:
+              "How content and author_notes are written. \"markdown\" (default): converted to the BBCode World Anvil's own editor writes. \"bbcode\": sent exactly as written, nothing converted.",
+          },
+          author_notes: {
+            type: "string",
+            description:
+              "Working notes for the article's own Author Notes section, shown at the foot of the article and kept separate from the main text (e.g. why something is canon, what is still to develop). Not part of content.",
           },
           icon: {
             type: "string",
@@ -312,7 +323,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_update_article",
       description:
-        "Update an existing article in WorldAnvil. Markdown is automatically converted to BBCode in both the content field AND all template-specific fields passed via the fields parameter. Can set a different icon or reset it to the template's own. Cannot change an article's template, except to a variant of the same one (Organization to Country, Military or Religion; Character to God/Deity).",
+        "Update an existing article in WorldAnvil. Only what is passed changes: content replaces the main text, author_notes replaces the Author Notes section, and each leaves the other alone. Markdown in content, author_notes and template-specific fields is converted to the BBCode World Anvil's own editor writes; BBCode already in the text is left as it is. Can set a different icon or reset it to the template's own. Cannot change an article's template, except to a variant of the same one (Organization to Country, Military or Religion; Character to God/Deity).",
       inputSchema: {
         type: "object",
         properties: {
@@ -327,7 +338,18 @@ export function getToolDefinitions() {
           content: {
             type: "string",
             description:
-              "The new main content of the article (markdown auto-converted to BBCode)",
+              "The new main text of the article (markdown auto-converted to BBCode). No table of contents is added unless asked for: to have one, put [articletoc] on a line of its own where it should appear (World Anvil builds the list from the headings and keeps it current). It has no title of its own; add a line above it if the user wants one.",
+          },
+          format: {
+            type: "string",
+            enum: ["markdown", "bbcode"],
+            description:
+              "How content and author_notes are written. \"markdown\" (default): converted to the BBCode World Anvil's own editor writes. \"bbcode\": sent exactly as written, nothing converted.",
+          },
+          author_notes: {
+            type: "string",
+            description:
+              "Working notes for the article's own Author Notes section, shown at the foot of the article and kept separate from the main text (e.g. why something is canon, what is still to develop). Not part of content.",
           },
           icon: {
             type: "string",

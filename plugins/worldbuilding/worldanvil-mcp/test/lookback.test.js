@@ -238,7 +238,7 @@ describe("searching backups", () => {
 describe("comparing a saved copy with the item now", () => {
   it("lists the lines lost and added since the copy saved before the edit", async () => {
     const call = await connect();
-    await call("update_article", { article_id: ARTICLE, content: "First line of lore\nLast line\nAn added line" });
+    await call("update_article", { article_id: ARTICLE, content: "First line of lore\nLast line\nAn added line", format: "bbcode" });
     const result = await call("compare_backup", item);
     expect(result.identical).toBe(false);
     expect(result.compared_with.saved).toBe("before an edit");
@@ -289,7 +289,7 @@ describe("comparing a saved copy with the item now", () => {
 
 describe("restoring one item", () => {
   const edited = async (call) => {
-    await call("update_article", { article_id: ARTICLE, content: "Ruined", title: "Hero (broken)" });
+    await call("update_article", { article_id: ARTICLE, content: "Ruined", format: "bbcode", title: "Hero (broken)" });
     // Changed by hand since: privacy and filing, which restore must leave alone.
     articles[ARTICLE].state = "public";
     articles[ARTICLE].category = { id: "c0000000-0000-4000-8000-000000000002", title: "Elsewhere" };

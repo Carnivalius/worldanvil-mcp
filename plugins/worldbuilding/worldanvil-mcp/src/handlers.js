@@ -45,6 +45,26 @@ export function sanitizeFields(fields) {
 }
 
 /**
+ * An article's main text and author notes, ready to send.
+ * format "markdown" (the default): converted to the BBCode World Anvil's
+ * own editor writes. format "bbcode": sent exactly as written.
+ * The main text always gets paragraphs; author notes only when they run
+ * to more than one line.
+ */
+function articleText(args, anchorSeed) {
+  const format = args.format === undefined ? "markdown" : String(args.format).toLowerCase();
+  if (format !== "markdown" && format !== "bbcode")
+    throw new Error(`format must be "markdown" or "bbcode", not "${args.format}"`);
+  const asWritten = format === "bbcode";
+  const out = {};
+  if (args.content !== undefined)
+    out.content = asWritten ? args.content : markdownToBBCode(args.content, { paragraphs: true, anchorSeed });
+  if (args.author_notes !== undefined)
+    out.authornotes = asWritten ? args.author_notes : markdownToBBCode(args.author_notes, { anchorSeed: `${anchorSeed} notes` });
+  return out;
+}
+
+/**
  * Private by default: a new article must end up private whatever the
  * world's own setting is. `state: "private"` is sent on create; this checks
  * it took, corrects it if not, and says plainly if it couldn't.
@@ -252,10 +272,9 @@ export async function handleToolCall(name, args, client) {
         };
         if (template.variant)
           data.articleMetadata = metadataWithVariant(null, template.variant);
-        if (args.content !== undefined)
-          data.content = markdownToBBCode(args.content);
         Object.assign(data, sanitizeFields(args.fields));
         // After the fields, so nothing in them can override these.
+        Object.assign(data, articleText(args, String(args.title ?? "")));
         data.icon = icon;
         data.state = "private";
         if (args.category_id) data.category = { id: args.category_id };
@@ -271,9 +290,8 @@ export async function handleToolCall(name, args, client) {
       case "worldanvil_update_article": {
         const data = {};
         if (args.title !== undefined) data.title = args.title;
-        if (args.content !== undefined)
-          data.content = markdownToBBCode(args.content);
         Object.assign(data, sanitizeFields(args.fields));
+        Object.assign(data, articleText(args, String(args.article_id ?? "")));
         Object.assign(data, await articleIdentityChanges(client, args));
         if (args.category_id) data.category = { id: args.category_id };
         return jsonResponse(await client.updateArticle(args.article_id, data));

@@ -111,7 +111,7 @@ describe.runIf(stage === "update")("stage 3: update (test items only)", () => {
     });
     const article = await read("worldanvil_get_article", { article_id: ids["/article"] });
     note(`article content as stored: ${JSON.stringify(article.content)}`);
-    expect(article.content).toBe("Edited by the [b]live test[/b].");
+    expect(article.content).toBe("[p]Edited by the [b]live test[/b].[/p]");
   });
 
   it("refuses a rename that drops the MCP-TEST- prefix, without sending it", async () => {
