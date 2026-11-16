@@ -270,7 +270,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_create_article",
       description:
-        "Create a new article in WorldAnvil. It is created private and gets the same icon World Anvil gives that template; the answer's `privacy` confirms it is private. This tool never makes anything public (that is done on the World Anvil website). Put the lore in content and working notes in author_notes. Markdown in content, author_notes and all template-specific fields is converted to the BBCode World Anvil's own editor writes (paragraphs, headings, lists, quotes, tables, links); BBCode already in the text is left as it is. Use the fields parameter to set template-specific fields like localization, manifestation, lawtype (for Natural Law), anatomy, traits (for Species), seeded, authornotes, etc.",
+        "Create a new article in WorldAnvil. Refused, with nothing sent, if the world already has an article with the same title (capitals and extra spaces ignored): use a different title or update the existing article. It is created private and gets the same icon World Anvil gives that template; the answer's `privacy` confirms it is private. This tool never makes anything public (that is done on the World Anvil website). Put the lore in content and working notes in author_notes. Do not open content with a heading that repeats the title: World Anvil shows the title itself, and such an opening heading is left out (the answer says so in `title_heading`). Markdown in content, author_notes and all template-specific fields is converted to the BBCode World Anvil's own editor writes (paragraphs, headings, lists, quotes, tables, links); BBCode already in the text is left as it is. Use the fields parameter to set template-specific fields like localization, manifestation, lawtype (for Natural Law), anatomy, traits (for Species), seeded, authornotes, etc.",
       inputSchema: {
         type: "object",
         properties: {
@@ -323,7 +323,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_update_article",
       description:
-        "Update an existing article in WorldAnvil. Only what is passed changes: content replaces the main text, author_notes replaces the Author Notes section, and each leaves the other alone. Markdown in content, author_notes and template-specific fields is converted to the BBCode World Anvil's own editor writes; BBCode already in the text is left as it is. Can set a different icon or reset it to the template's own. Cannot change an article's template, except to a variant of the same one (Organization to Country, Military or Religion; Character to God/Deity).",
+        "Update an existing article in WorldAnvil. A new title is refused if another article in the world already has it. An opening heading in content that only repeats the title is left out (the answer says so in `title_heading`). Only what is passed changes: content replaces the main text, author_notes replaces the Author Notes section, and each leaves the other alone. Markdown in content, author_notes and template-specific fields is converted to the BBCode World Anvil's own editor writes; BBCode already in the text is left as it is. Can set a different icon or reset it to the template's own. Cannot change an article's template, except to a variant of the same one (Organization to Country, Military or Religion; Character to God/Deity).",
       inputSchema: {
         type: "object",
         properties: {

@@ -4,7 +4,7 @@
  * Implementation of all tool call handlers.
  */
 
-import { markdownToBBCode, convertFieldsToBBCode } from "./utils.js";
+import { markdownToBBCode, convertFieldsToBBCode, dropTitleHeading, opensWithHeading } from "./utils.js";
 import {
   CATEGORY_DEFAULT_ICON,
   metadataWithVariant,
@@ -12,7 +12,7 @@ import {
   resolveTemplate,
   templateOfArticle,
 } from "./article-templates.js";
-import { listPage, worldOutline } from "./listing.js";
+import { listPage, refuseDuplicateTitle, worldOutline } from "./listing.js";
 import { backupWorld } from "./access/world-backup.js";
 import { backupItem, compareBackup, listBackups, restoreItem, searchBackups } from "./access/lookback.js";
 
@@ -50,18 +50,32 @@ export function sanitizeFields(fields) {
  * own editor writes. format "bbcode": sent exactly as written.
  * The main text always gets paragraphs; author notes only when they run
  * to more than one line.
+ *
+ * `title` (the article's title, or a function that fetches it) lets an
+ * opening Markdown heading that only repeats the title be dropped; the
+ * function is called only when the text does open with a heading.
+ * Returns the fields to send and, if a heading was dropped, a note saying so.
  */
-function articleText(args, anchorSeed) {
+async function articleText(args, anchorSeed, title) {
   const format = args.format === undefined ? "markdown" : String(args.format).toLowerCase();
   if (format !== "markdown" && format !== "bbcode")
     throw new Error(`format must be "markdown" or "bbcode", not "${args.format}"`);
   const asWritten = format === "bbcode";
   const out = {};
-  if (args.content !== undefined)
-    out.content = asWritten ? args.content : markdownToBBCode(args.content, { paragraphs: true, anchorSeed });
+  let note = null;
+  if (args.content !== undefined) {
+    let content = args.content;
+    if (!asWritten && typeof content === "string" && opensWithHeading(content)) {
+      const cut = dropTitleHeading(content, typeof title === "function" ? await title() : title);
+      content = cut.text;
+      if (cut.dropped)
+        note = `The opening heading "${cut.dropped}" was left out because it repeats the article's title, which World Anvil already shows above the text.`;
+    }
+    out.content = asWritten ? content : markdownToBBCode(content, { paragraphs: true, anchorSeed });
+  }
   if (args.author_notes !== undefined)
     out.authornotes = asWritten ? args.author_notes : markdownToBBCode(args.author_notes, { anchorSeed: `${anchorSeed} notes` });
-  return out;
+  return { fields: out, note };
 }
 
 /**
@@ -274,16 +288,20 @@ export async function handleToolCall(name, args, client) {
           data.articleMetadata = metadataWithVariant(null, template.variant);
         Object.assign(data, sanitizeFields(args.fields));
         // After the fields, so nothing in them can override these.
-        Object.assign(data, articleText(args, String(args.title ?? "")));
+        const text = await articleText(args, String(args.title ?? ""), args.title);
+        Object.assign(data, text.fields);
         data.icon = icon;
         data.state = "private";
         if (args.category_id) data.category = { id: args.category_id };
+        // One title, one article: checked last, just before sending.
+        await refuseDuplicateTitle(client, args.world_id, args.title);
         const created = await client.createArticle(data);
         return jsonResponse({
           ...created,
           template: template.siteName,
           icon,
           privacy: await confirmArticlePrivate(client, created),
+          ...(text.note ? { title_heading: text.note } : {}),
         });
       }
 
@@ -291,10 +309,23 @@ export async function handleToolCall(name, args, client) {
         const data = {};
         if (args.title !== undefined) data.title = args.title;
         Object.assign(data, sanitizeFields(args.fields));
-        Object.assign(data, articleText(args, String(args.article_id ?? "")));
+        // The title to compare an opening heading with: the new one if the
+        // article is being renamed, otherwise the one it has now (read
+        // only if the text does open with a heading).
+        const text = await articleText(args, String(args.article_id ?? ""),
+          args.title !== undefined
+            ? args.title
+            : async () => (await client.getArticle(args.article_id))?.title);
+        Object.assign(data, text.fields);
         Object.assign(data, await articleIdentityChanges(client, args));
         if (args.category_id) data.category = { id: args.category_id };
-        return jsonResponse(await client.updateArticle(args.article_id, data));
+        if (args.title !== undefined) {
+          // A rename must not take a title another article already has.
+          const current = await client.getArticle(args.article_id);
+          await refuseDuplicateTitle(client, current?.world?.id, args.title, args.article_id);
+        }
+        const updated = await client.updateArticle(args.article_id, data);
+        return jsonResponse(text.note ? { ...updated, title_heading: text.note } : updated);
       }
 
       case "worldanvil_delete_article":

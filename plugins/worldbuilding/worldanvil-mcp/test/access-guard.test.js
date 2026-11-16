@@ -437,7 +437,8 @@ describe("server: end to end (fake World Anvil)", () => {
     const c = await connect({}, file);
     const r = await c.callTool({
       name: "worldanvil_update_article",
-      arguments: { article_id: I.article, title: "Hero II" },
+      // Not a rename: a rename also reads the article to check its new title.
+      arguments: { article_id: I.article, content: "Hero, once more." },
     });
     expect(r.isError).toBeFalsy();
     const touched = calls.filter((x) => x.endpoint.startsWith(`/article?id=${I.article}`));

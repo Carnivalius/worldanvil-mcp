@@ -62,7 +62,9 @@ function articleClient(overrides = {}) {
   return {
     createArticle: vi.fn(async (data) => ({ id: "new-1", title: data.title, state: data.state })),
     updateArticle: vi.fn(async (id, data) => ({ id, ...data })),
-    getArticle: vi.fn(async (id) => ({ id, state: "private" })),
+    getArticle: vi.fn(async (id) => ({ id, state: "private", world: { id: "w1" } })),
+    // The title check before a create or rename: an empty world.
+    listArticles: vi.fn(async () => ({ entities: [] })),
     createCategory: vi.fn(async (data) => ({ id: "cat-1", ...data })),
     updateCategory: vi.fn(async (id, data) => ({ id, ...data })),
     ...overrides,
@@ -334,7 +336,7 @@ describe("create article", () => {
 
 describe("update article: icon and variant", () => {
   const existing = (article) =>
-    articleClient({ getArticle: vi.fn(async (id) => ({ id, ...article })) });
+    articleClient({ getArticle: vi.fn(async (id) => ({ id, world: { id: "w1" }, ...article })) });
 
   it("sets a chosen icon without reading the article first", async () => {
     const client = existing({});
@@ -404,6 +406,184 @@ describe("update article: icon and variant", () => {
     const client = existing({ templateType: "person", icon: "fa-person" });
     await call("worldanvil_update_article", { article_id: "a1", template: "Character", title: "T" }, client);
     expect(client.updateArticle).toHaveBeenCalledWith("a1", { title: "T" });
+  });
+});
+
+describe("one title, one article", () => {
+  const world = (...articles) => ({
+    listArticles: vi.fn(async (worldId, { offset = 0, limit = 50 } = {}) => ({
+      entities: articles.slice(offset, offset + limit),
+    })),
+  });
+  const mountains = { id: "a-9", title: "Iron Mountains", entityClass: "Location", state: "private" };
+  const create = (title, client) =>
+    call("worldanvil_create_article", { title, world_id: "w1", template: "Geography" }, client);
+
+  it("refuses a create whose title another article has, and sends nothing", async () => {
+    const client = articleClient(world(mountains));
+    await expect(create("Iron Mountains", client)).rejects.toThrow(
+      /already has an article with that title: "Iron Mountains" \(Geography, id a-9, private\).*Nothing was sent.*different title.*worldanvil_update_article/s,
+    );
+    expect(client.createArticle).not.toHaveBeenCalled();
+    expect(client.listArticles.mock.calls[0][0]).toBe("w1");
+  });
+
+  it("capitals and extra spaces make no difference", async () => {
+    for (const title of ["iron mountains", "  IRON   Mountains ", "Iron	Mountains"]) {
+      const client = articleClient(world(mountains));
+      await expect(create(title, client)).rejects.toThrow(/already has an article/);
+      expect(client.createArticle).not.toHaveBeenCalled();
+    }
+  });
+
+  it("a title that only resembles another is allowed", async () => {
+    for (const title of ["The Iron Mountains", "Iron Mountain", "Iron-Mountains"]) {
+      const client = articleClient(world(mountains));
+      await create(title, client);
+      expect(client.createArticle).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("finds a clash beyond the first page of the list", async () => {
+    const many = Array.from({ length: 120 }, (_, i) => ({ id: `a-${i}`, title: `Place ${i}` }));
+    const client = articleClient(world(...many, { id: "a-last", title: "Far Shore" }));
+    await expect(create("far shore", client)).rejects.toThrow(/id a-last/);
+    expect(client.listArticles.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("names every article that has the title", async () => {
+    const client = articleClient(world(mountains, { id: "a-10", title: "IRON MOUNTAINS" }));
+    await expect(create("Iron Mountains", client)).rejects.toThrow(/already has 2 articles.*a-9.*a-10/s);
+  });
+
+  it("refuses a rename to a title another article has", async () => {
+    const client = articleClient(world(mountains, { id: "a1", title: "Old Name" }));
+    await expect(
+      call("worldanvil_update_article", { article_id: "a1", title: "iron mountains" }, client),
+    ).rejects.toThrow(/already has an article with that title/);
+    expect(client.updateArticle).not.toHaveBeenCalled();
+  });
+
+  it("an article may keep, or re-case, its own title", async () => {
+    const client = articleClient(world(mountains));
+    await call("worldanvil_update_article", { article_id: "A-9", title: "IRON Mountains" }, client);
+    expect(client.updateArticle).toHaveBeenCalledWith("A-9", { title: "IRON Mountains" });
+  });
+
+  it("an update that leaves the title alone reads no list", async () => {
+    const client = articleClient(world(mountains));
+    await call("worldanvil_update_article", { article_id: "a1", content: "New text." }, client);
+    expect(client.listArticles).not.toHaveBeenCalled();
+    expect(client.getArticle).not.toHaveBeenCalled();
+  });
+
+  it("refuses a rename when the article's world can't be told", async () => {
+    const client = articleClient({ ...world(mountains), getArticle: vi.fn(async (id) => ({ id })) });
+    await expect(
+      call("worldanvil_update_article", { article_id: "a1", title: "Anything" }, client),
+    ).rejects.toThrow(/Could not tell which world.*Nothing was sent/s);
+    expect(client.updateArticle).not.toHaveBeenCalled();
+  });
+});
+
+describe("an opening heading that repeats the title", () => {
+  const create = (args, client) =>
+    call("worldanvil_create_article", { title: "Iron Mountains", world_id: "w1", ...args }, client);
+  const sent = (client) => client.createArticle.mock.calls[0][0].content;
+
+  it("is left out on create, and the answer says so", async () => {
+    const client = articleClient();
+    const answer = await create({ content: "# Iron Mountains\n\nA cold range.\n\nSecond paragraph." }, client);
+    expect(sent(client)).toBe("[p]A cold range.[/p]\n[p]Second paragraph.[/p]");
+    expect(answer.title_heading).toMatch(/"# Iron Mountains" was left out because it repeats the article's title/);
+  });
+
+  it("matches at any level, whatever the capitals, spaces or emphasis", async () => {
+    for (const heading of ["## iron mountains", "###   IRON   Mountains  ", "# **Iron Mountains**", "\n\n#### _Iron Mountains_", "# Iron Mountains #"]) {
+      const client = articleClient();
+      await create({ content: `${heading}\n\nA cold range.` }, client);
+      expect(sent(client), heading).toBe("[p]A cold range.[/p]");
+    }
+  });
+
+  it("keeps a heading that only contains the title, and says nothing", async () => {
+    for (const heading of ["# Iron Mountains: Overview", "# The Iron Mountains", "# Overview"]) {
+      const client = articleClient();
+      const answer = await create({ content: `${heading}\n\nA cold range.` }, client);
+      expect(sent(client), heading).toMatch(/^\[h1\|[0-9a-f-]{36}\]/);
+      expect(answer.title_heading).toBeUndefined();
+    }
+  });
+
+  it("keeps the same heading when it is not the first line", async () => {
+    const client = articleClient();
+    await create({ content: "Opening words.\n\n# Iron Mountains\n\nMore." }, client);
+    expect(sent(client)).toMatch(/^\[p\]Opening words\.\[\/p\]\n\[h1\|[0-9a-f-]{36}\]Iron Mountains\[\/h1\]/);
+  });
+
+  it("drops only the first of two", async () => {
+    const client = articleClient();
+    await create({ content: "# Iron Mountains\n\n# Iron Mountains\n\nText." }, client);
+    expect(sent(client)).toMatch(/^\[h1\|[0-9a-f-]{36}\]Iron Mountains\[\/h1\]\n\[p\]Text\.\[\/p\]$/);
+  });
+
+  it("leaves bbcode-format text and author notes exactly as written", async () => {
+    const client = articleClient();
+    const answer = await create(
+      { content: "# Iron Mountains\n[p]Text[/p]", author_notes: "# Iron Mountains\n\nA note.", format: "bbcode" },
+      client,
+    );
+    const data = client.createArticle.mock.calls[0][0];
+    expect(data.content).toBe("# Iron Mountains\n[p]Text[/p]");
+    expect(data.authornotes).toBe("# Iron Mountains\n\nA note.");
+    expect(answer.title_heading).toBeUndefined();
+
+    const md = articleClient();
+    await create({ content: "Text.", author_notes: "# Iron Mountains\n\nA note." }, md);
+    expect(md.createArticle.mock.calls[0][0].authornotes).toMatch(/^\[h1\|[0-9a-f-]{36}\]Iron Mountains\[\/h1\]/);
+  });
+
+  describe("on update", () => {
+    const existing = () =>
+      articleClient({
+        getArticle: vi.fn(async (id) => ({ id, title: "Iron Mountains", world: { id: "w1" } })),
+      });
+
+    it("compares with the article's present title, read once", async () => {
+      const client = existing();
+      const answer = await call(
+        "worldanvil_update_article",
+        { article_id: "a1", content: "# iron mountains\n\nNew text." },
+        client,
+      );
+      expect(client.updateArticle).toHaveBeenCalledWith("a1", { content: "[p]New text.[/p]" });
+      expect(client.getArticle).toHaveBeenCalledOnce();
+      expect(answer.title_heading).toMatch(/left out because it repeats/);
+    });
+
+    it("compares with the new title when the article is being renamed", async () => {
+      const client = existing();
+      await call(
+        "worldanvil_update_article",
+        { article_id: "a1", title: "Frost Peaks", content: "# Frost Peaks\n\nNew text." },
+        client,
+      );
+      expect(client.updateArticle.mock.calls[0][1]).toEqual({ title: "Frost Peaks", content: "[p]New text.[/p]" });
+
+      const kept = existing();
+      await call(
+        "worldanvil_update_article",
+        { article_id: "a1", title: "Frost Peaks", content: "# Iron Mountains\n\nNew text." },
+        kept,
+      );
+      expect(kept.updateArticle.mock.calls[0][1].content).toMatch(/^\[h1\|/);
+    });
+
+    it("does not read the article when the text opens with no heading", async () => {
+      const client = existing();
+      await call("worldanvil_update_article", { article_id: "a1", content: "Plain opening.\n\n# Iron Mountains" }, client);
+      expect(client.getArticle).not.toHaveBeenCalled();
+    });
   });
 });
 

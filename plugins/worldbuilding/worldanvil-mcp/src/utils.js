@@ -285,6 +285,49 @@ export function markdownToBBCode(text, options = {}) {
  * @param {Object} data - Object with string fields to convert
  * @returns {Object} New object with converted string fields
  */
+const HEADING_LINE = /^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/;
+
+/** The text of a Markdown heading line, or null if the line is not one. */
+function headingText(line) {
+  const m = HEADING_LINE.exec(line);
+  if (!m) return null;
+  // Bold / italic marks around the whole heading make no difference.
+  return m[1].replace(/^(\*{1,3}|_{1,3})(.*)\1$/, "$2").trim();
+}
+
+const comparable = (s) => String(s ?? "").normalize("NFC").trim().replace(/\s+/g, " ").toLowerCase();
+
+/** True when the first non-blank line of the text is a Markdown heading. */
+export function opensWithHeading(markdown) {
+  const first = String(markdown ?? "").split(/\r?\n/).find((l) => l.trim() !== "");
+  return first !== undefined && headingText(first) !== null;
+}
+
+/**
+ * Drop an opening Markdown heading that only repeats the article's title
+ * (the site already shows the title above the text). Only the very first
+ * non-blank line is looked at, at any heading level; capitals and extra
+ * spaces make no difference. A heading that merely contains the title, or
+ * the same heading further down, is kept.
+ *
+ * @returns {{ text: string, dropped: string|null }} dropped = the line removed
+ */
+export function dropTitleHeading(markdown, title) {
+  const text = String(markdown ?? "");
+  const wanted = comparable(title);
+  if (!wanted) return { text, dropped: null };
+  const lines = text.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length && lines[i].trim() === "") i++;
+  if (i >= lines.length) return { text, dropped: null };
+  const heading = headingText(lines[i]);
+  if (heading === null || comparable(heading) !== wanted) return { text, dropped: null };
+  const dropped = lines[i].trim();
+  let j = i + 1;
+  while (j < lines.length && lines[j].trim() === "") j++;
+  return { text: lines.slice(j).join("\n"), dropped };
+}
+
 export function convertFieldsToBBCode(data) {
   if (!data || typeof data !== "object") return data;
 

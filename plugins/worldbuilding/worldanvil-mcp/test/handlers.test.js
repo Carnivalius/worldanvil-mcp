@@ -22,6 +22,9 @@ function makeMockClient(overrides = {}) {
     updateCategory: stub("updateCategory"),
     createArticle: stub("createArticle"),
     updateArticle: stub("updateArticle"),
+    // The title check before a create or rename: an empty world.
+    listArticles: vi.fn(async () => ({ entities: [] })),
+    getArticle: vi.fn(async (id) => ({ id, world: { id: "world-1" } })),
     createSecret: stub("createSecret"),
     updateSecret: stub("updateSecret"),
     updateCanvas: stub("updateCanvas"),

@@ -166,3 +166,43 @@ export async function worldOutline(client, worldId) {
       "Religion, God/Deity) show as their base template here; read the article for its variant.",
   };
 }
+
+/**
+ * A title as it is compared: capitals, surrounding spaces and runs of
+ * spaces make no difference. "The Iron Mountains" and "Iron Mountains"
+ * stay different.
+ */
+export function titleKey(title) {
+  return String(title ?? "").normalize("NFC").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Every article in the world whose title is the same as `title`
+ * (see titleKey). Reads the world's whole article list.
+ */
+export async function articlesWithTitle(client, worldId, title) {
+  const key = titleKey(title);
+  if (!key) return [];
+  const articles = await listAll((o) => client.listArticles(worldId, o));
+  return articles.filter((a) => titleKey(a?.title) === key).map(articleLine);
+}
+
+/**
+ * Refuse a title another article in the world already has (agreed
+ * 2026-11-16: no override; the way forward is a different title).
+ * `exceptId` is the article being renamed, which may keep its own title.
+ */
+export async function refuseDuplicateTitle(client, worldId, title, exceptId = null) {
+  if (!worldId) throw new Error("Could not tell which world this article is in, so its title could not be checked against the others. Nothing was sent.");
+  const clashes = (await articlesWithTitle(client, worldId, title)).filter(
+    (a) => !exceptId || lower(a.id) !== lower(exceptId),
+  );
+  if (clashes.length === 0) return;
+  const list = clashes
+    .map((a) => `"${a.title}" (${a.template ?? "article"}, id ${a.id}${a.state ? `, ${a.state}` : ""})`)
+    .join("; ");
+  throw new Error(
+    `This world already has ${clashes.length === 1 ? "an article" : `${clashes.length} articles`} with that title: ${list}. ` +
+      "Nothing was sent. Either use a different title, or change the existing article with worldanvil_update_article.",
+  );
+}
