@@ -15,6 +15,12 @@ const call = async (name, args, client) => {
   return parse(response);
 };
 
+/** How many times the article was read BEFORE the save (the read-back after it is not counted). */
+const readsBeforeSave = (client) => {
+  const saved = client.updateArticle.mock.invocationCallOrder[0] ?? Infinity;
+  return client.getArticle.mock.invocationCallOrder.filter((n) => n < saved).length;
+};
+
 const ARTICLES = [
   { id: "a-1", title: "Queen Elara", entityClass: "Person", state: "private" },
   { id: "a-2", title: "Thronehold", entityClass: "Settlement", state: "private" },
@@ -215,7 +221,7 @@ describe("update article with [[links]]", () => {
     const client = worldClient();
     const answer = await update({ content: "Seat of [[Queen Elara]]." }, client);
     expect(client.updateArticle).toHaveBeenCalledWith("a-2", { content: "[p]Seat of @[Queen Elara](Article:a-1).[/p]" });
-    expect(client.getArticle).toHaveBeenCalledTimes(1);
+    expect(readsBeforeSave(client)).toBe(1);
     expect(client.listArticles.mock.calls[0][0]).toBe("w1");
     expect(answer.links.linked).toEqual([{ name: "Queen Elara", title: "Queen Elara", id: "a-1" }]);
   });
@@ -244,14 +250,14 @@ describe("update article with [[links]]", () => {
       title: "Thronehold Keep",
       content: "[p]Seat of @[Queen Elara](Article:a-1).[/p]",
     });
-    expect(client.getArticle).toHaveBeenCalledTimes(1);
+    expect(readsBeforeSave(client)).toBe(1);
     expect(client.listArticles).toHaveBeenCalledTimes(1);
   });
 
   it("an update with no links and no heading reads nothing first", async () => {
     const client = worldClient();
     await update({ content: "Plain text." }, client);
-    expect(client.getArticle).not.toHaveBeenCalled();
+    expect(readsBeforeSave(client)).toBe(0);
     expect(client.listArticles).not.toHaveBeenCalled();
   });
 

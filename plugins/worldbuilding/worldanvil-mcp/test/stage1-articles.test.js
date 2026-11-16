@@ -24,6 +24,12 @@ const call = async (name, args, client) => {
   return parse(response);
 };
 
+/** How many times the article was read BEFORE the save (the read-back after it is not counted). */
+const readsBeforeSave = (client) => {
+  const saved = client.updateArticle.mock.invocationCallOrder[0] ?? Infinity;
+  return client.getArticle.mock.invocationCallOrder.filter((n) => n < saved).length;
+};
+
 /** What the site was read to give each tile, 2026-11-12. */
 const EXPECTED = [
   ["Generic", "article", null, "fa-books"],
@@ -474,7 +480,7 @@ describe("one title, one article", () => {
     const client = articleClient(world(mountains));
     await call("worldanvil_update_article", { article_id: "a1", content: "New text." }, client);
     expect(client.listArticles).not.toHaveBeenCalled();
-    expect(client.getArticle).not.toHaveBeenCalled();
+    expect(readsBeforeSave(client)).toBe(0);
   });
 
   it("refuses a rename when the article's world can't be told", async () => {
@@ -557,7 +563,7 @@ describe("an opening heading that repeats the title", () => {
         client,
       );
       expect(client.updateArticle).toHaveBeenCalledWith("a1", { content: "[p]New text.[/p]" });
-      expect(client.getArticle).toHaveBeenCalledOnce();
+      expect(readsBeforeSave(client)).toBe(1);
       expect(answer.title_heading).toMatch(/left out because it repeats/);
     });
 
@@ -582,7 +588,7 @@ describe("an opening heading that repeats the title", () => {
     it("does not read the article when the text opens with no heading", async () => {
       const client = existing();
       await call("worldanvil_update_article", { article_id: "a1", content: "Plain opening.\n\n# Iron Mountains" }, client);
-      expect(client.getArticle).not.toHaveBeenCalled();
+      expect(readsBeforeSave(client)).toBe(0);
     });
   });
 });

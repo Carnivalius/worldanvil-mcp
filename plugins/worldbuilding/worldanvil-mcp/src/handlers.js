@@ -209,6 +209,62 @@ async function confirmArticlePrivate(client, created) {
   }
 }
 
+const CHECK_LABELS = { title: "title", content: "main text", authornotes: "author notes" };
+
+/** A short stretch of text around a position, made safe to show on one line. */
+function excerpt(text, at) {
+  const piece = text.slice(Math.max(0, at - 20), at + 40);
+  return JSON.stringify(piece);
+}
+
+/**
+ * Read an article back after a create or update and say whether the text
+ * that was sent is what World Anvil now holds. Checks the title, main
+ * text, author notes and any template text fields that were sent: nothing
+ * else. Reports only: it never retries, corrects or undoes, and a failure
+ * to read back is a warning, not an error (the article is already saved).
+ *
+ * @param {object} sent - the fields that went to World Anvil
+ * @param {string[]} keys - which of them to check
+ * @returns {Promise<string|null>} null when nothing checkable was sent
+ */
+async function storedCheck(client, id, sent, keys) {
+  const wanted = [...new Set(keys)].filter((k) => typeof sent[k] === "string");
+  if (wanted.length === 0) return null;
+  const label = (k) => CHECK_LABELS[k] ?? `field "${k}"`;
+  const names = wanted.map(label);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+  let stored;
+  try {
+    if (!id) throw new Error("World Anvil didn't return the article's id");
+    stored = await client.getArticle(id);
+  } catch (e) {
+    return `WARNING: the article was saved but could not be read back to check it (${e.message}). Look at it on the World Anvil website.`;
+  }
+  const problems = [];
+  for (const key of wanted) {
+    const a = sent[key];
+    const b = stored?.[key];
+    if (a === b) continue;
+    if (typeof b !== "string") {
+      problems.push(`${label(key)}: sent ${a.length} characters, but the read-back holds ${b == null ? "nothing" : "something that is not text"}`);
+      continue;
+    }
+    let at = 0;
+    while (at < a.length && at < b.length && a[at] === b[at]) at++;
+    problems.push(
+      `${label(key)}: sent ${a.length} characters, stored ${b.length}; they first differ at character ${at + 1}: ` +
+        `sent ${excerpt(a, at)}, stored ${excerpt(b, at)}`,
+    );
+  }
+  if (problems.length === 0)
+    return `Checked: ${list} ${names.length > 1 || names[0] === "author notes" ? "are" : "is"} stored exactly as sent.`;
+  return (
+    `WARNING: what World Anvil stored is not what was sent. ${problems.join("; ")}. ` +
+    "Nothing was retried or undone. Look at the article on the World Anvil website."
+  );
+}
+
 /**
  * What to send when an existing article's icon or variant is changed.
  * Reads the article only when the answer depends on what it is now.
@@ -399,7 +455,8 @@ export async function handleToolCall(name, args, client) {
         };
         if (template.variant)
           data.articleMetadata = metadataWithVariant(null, template.variant);
-        Object.assign(data, sanitizeFields(args.fields));
+        const templateFields = sanitizeFields(args.fields);
+        Object.assign(data, templateFields);
         // One read of the world's articles serves both the title check and
         // any [[links]] in the text.
         const articles = await allArticles(client, args.world_id);
@@ -416,11 +473,19 @@ export async function handleToolCall(name, args, client) {
         data.state = "private";
         if (args.category_id) data.category = { id: args.category_id };
         const created = await client.createArticle(data);
+        const privacy = await confirmArticlePrivate(client, created);
+        const stored = await storedCheck(client, created?.id, data, [
+          "title",
+          "content",
+          "authornotes",
+          ...Object.keys(templateFields ?? {}),
+        ]);
         return jsonResponse({
           ...created,
           template: template.siteName,
           icon,
-          privacy: await confirmArticlePrivate(client, created),
+          privacy,
+          ...(stored ? { stored } : {}),
           ...(text.note ? { title_heading: text.note } : {}),
           ...(text.links ? { links: text.links } : {}),
         });
@@ -429,7 +494,8 @@ export async function handleToolCall(name, args, client) {
       case "worldanvil_update_article": {
         const data = {};
         if (args.title !== undefined) data.title = args.title;
-        Object.assign(data, sanitizeFields(args.fields));
+        const templateFields = sanitizeFields(args.fields);
+        Object.assign(data, templateFields);
         // The article as it is now, read at most once and only if needed:
         // for its title (an opening heading that repeats it) and its world
         // ([[links]], and the title check on a rename).
@@ -456,8 +522,15 @@ export async function handleToolCall(name, args, client) {
           await refuseDuplicateTitle(client, await worldId(), args.title, args.article_id, await articles());
         }
         const updated = await client.updateArticle(args.article_id, data);
+        const stored = await storedCheck(client, args.article_id, data, [
+          "title",
+          "content",
+          "authornotes",
+          ...Object.keys(templateFields ?? {}),
+        ]);
         return jsonResponse({
           ...updated,
+          ...(stored ? { stored } : {}),
           ...(text.note ? { title_heading: text.note } : {}),
           ...(text.links ? { links: text.links } : {}),
         });

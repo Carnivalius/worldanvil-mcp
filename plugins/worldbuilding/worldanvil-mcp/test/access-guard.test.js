@@ -442,7 +442,8 @@ describe("server: end to end (fake World Anvil)", () => {
     });
     expect(r.isError).toBeFalsy();
     const touched = calls.filter((x) => x.endpoint.startsWith(`/article?id=${I.article}`));
-    expect(touched.map((x) => x.method)).toEqual(["GET", "PATCH"]);
+    // One read before the edit (the backup); the last GET is the read-back after saving.
+    expect(touched.map((x) => x.method)).toEqual(["GET", "PATCH", "GET"]);
     const saved = readdirSync(join(dir, "backups"), { recursive: true }).filter((f) => String(f).endsWith(".json"));
     expect(saved.length).toBe(1);
     expect(readFileSync(join(dir, "backups", String(saved[0])), "utf8")).toContain("Hero");

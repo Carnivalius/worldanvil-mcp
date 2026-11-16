@@ -132,7 +132,8 @@ describe("backups before changes", () => {
     const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
     const c = await connect({}, dir);
     await c.callTool({ name: "worldanvil_update_article", arguments: { article_id: ARTICLE, content: "v2" } });
-    expect(calls.filter((x) => x.endpoint.startsWith("/article?")).map((x) => x.method)).toEqual(["GET", "PATCH"]);
+    // One read before the edit (the backup); the last GET is the read-back after saving.
+    expect(calls.filter((x) => x.endpoint.startsWith("/article?")).map((x) => x.method)).toEqual(["GET", "PATCH", "GET"]);
     expect(JSON.parse(readFileSync(files(dir)[0], "utf8")).data.content).toBe("Original text v1");
   });
 
