@@ -440,9 +440,32 @@ function isFullRead(endpoint, method) {
   return [...params.keys()].sort().join(",") === "granularity,id" && params.get("granularity") === "2";
 }
 
+/**
+ * How long a full read of an item may stand in for the backup read before
+ * an edit of that same item. The article tools read an article moments
+ * before changing it; reading it a second time for the backup tells World
+ * Anvil nothing new. Deletes never use it: they always read afresh.
+ */
+export const REUSE_READ_MS = 15_000;
+
 export function guardClient(client, access, backups = null, transport = null) {
   const raw = transport ?? Object.getPrototypeOf(client).request.bind(client);
   access.send = raw;
+
+  // Full reads from the last few seconds, by item. Only ever what World
+  // Anvil itself returned through this guard; dropped when the item is
+  // changed, when they age out, or when asked (forgetRecentReads).
+  const recent = new Map();
+  const keyOf = (path, id) => `${path}:${String(id).toLowerCase()}`;
+  const remember = (path, id, item) => {
+    const now = Date.now();
+    for (const [k, v] of recent) if (now - v.at > REUSE_READ_MS) recent.delete(k);
+    if (item && typeof item === "object") recent.set(keyOf(path, id), { item: structuredClone(item), at: now });
+  };
+  const recall = (path, id) => {
+    const hit = recent.get(keyOf(path, id));
+    return hit && Date.now() - hit.at <= REUSE_READ_MS ? hit.item : null;
+  };
   Object.defineProperty(client, "request", {
     configurable: false,
     writable: false,
@@ -456,8 +479,16 @@ export function guardClient(client, access, backups = null, transport = null) {
           throw new AccessError("backups aren't configured, so changes are refused");
         let current;
         try {
+          // The copy to back up: the one fetched a moment ago to find the
+          // world, or (edits only) a full read from the last few seconds,
+          // or else a fresh read now.
+          const remembered = decision.action === "update" ? recall(decision.path, decision.id) : null;
+          // Whatever happens next, a remembered copy is not used twice.
+          recent.delete(keyOf(decision.path, decision.id));
           current =
-            decision.item ?? (await raw(`${decision.path}?id=${decision.id}&granularity=2`, "GET"));
+            decision.item ??
+            remembered ??
+            (await raw(`${decision.path}?id=${decision.id}&granularity=2`, "GET"));
           backups.saveItem({
             worldId: decision.worldId,
             worldTitle: access.worlds?.get(decision.worldId) ?? "",
@@ -473,14 +504,23 @@ export function guardClient(client, access, backups = null, transport = null) {
 
       // A full-detail read of an item the check has just fetched: same
       // request, same answer, so don't send it twice.
-      if (decision.action === "read" && decision.item && isFullRead(endpoint, method))
+      const fullRead = decision.action === "read" && decision.id && isFullRead(endpoint, method);
+      if (fullRead && decision.item) {
+        remember(decision.path, decision.id, decision.item);
         return decision.item;
+      }
 
       const response = await raw(endpoint, method, body);
+      if (fullRead) remember(decision.path, decision.id, response);
       if (decision.path === "/user/worlds") return access.annotateWorldList(response);
       return response;
     },
   });
+  /**
+   * Forget every remembered read, so the next edit's backup is read afresh
+   * from World Anvil (for when an item may have just been changed elsewhere).
+   */
+  client.forgetRecentReads = () => recent.clear();
   client.access = access;
   client.backups = backups;
   return client;

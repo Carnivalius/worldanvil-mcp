@@ -254,10 +254,10 @@ describe("update article with [[links]]", () => {
     expect(client.listArticles).toHaveBeenCalledTimes(1);
   });
 
-  it("an update with no links and no heading reads nothing first", async () => {
+  it("an update with no links and no heading reads the article once and no list", async () => {
     const client = worldClient();
     await update({ content: "Plain text." }, client);
-    expect(readsBeforeSave(client)).toBe(0);
+    expect(readsBeforeSave(client)).toBe(1);
     expect(client.listArticles).not.toHaveBeenCalled();
   });
 

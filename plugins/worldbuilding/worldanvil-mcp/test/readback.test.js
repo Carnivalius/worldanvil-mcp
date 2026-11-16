@@ -118,7 +118,7 @@ describe("read-back after update", () => {
     const saved = client.updateArticle.mock.invocationCallOrder[0];
     const reads = client.getArticle.mock.invocationCallOrder;
     expect(reads.filter((n) => n > saved)).toHaveLength(1);
-    expect(reads.filter((n) => n < saved)).toHaveLength(0);
+    expect(reads.filter((n) => n < saved)).toHaveLength(1);
   });
 
   it("warns when the stored text differs", async () => {

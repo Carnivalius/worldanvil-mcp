@@ -442,7 +442,8 @@ describe("server: end to end (fake World Anvil)", () => {
     });
     expect(r.isError).toBeFalsy();
     const touched = calls.filter((x) => x.endpoint.startsWith(`/article?id=${I.article}`));
-    // One read before the edit (the backup); the last GET is the read-back after saving.
+    // The tool reads the article (to see whether anything would change); that read
+    // is the backup; the edit is sent; the last GET is the read-back after saving.
     expect(touched.map((x) => x.method)).toEqual(["GET", "PATCH", "GET"]);
     const saved = readdirSync(join(dir, "backups"), { recursive: true }).filter((f) => String(f).endsWith(".json"));
     expect(saved.length).toBe(1);

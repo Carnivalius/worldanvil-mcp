@@ -111,9 +111,19 @@ describe("backups before changes", () => {
     expect(calls.filter((x) => x.method === "PATCH")).toHaveLength(1);
 
     failBackupRead = true;
-    const r = await c.callTool({ name: "worldanvil_update_article", arguments: { article_id: ARTICLE, content: "v3" } });
+    // An icon change reads nothing first, and fresh_backup sets aside the read
+    // remembered from the edit above: so the only read is the backup read.
+    const r = await c.callTool({
+      name: "worldanvil_update_article",
+      arguments: { article_id: ARTICLE, icon: "fa-crown", fresh_backup: true },
+    });
     expect(r.isError).toBe(true);
     expect(r.content[0].text).toMatch(/couldn't back up the item first.*nothing was changed/);
+
+    // A text change reads the article first; that failing stops it just as surely.
+    const t = await c.callTool({ name: "worldanvil_update_article", arguments: { article_id: ARTICLE, content: "v3" } });
+    expect(t.isError).toBe(true);
+    expect(t.content[0].text).toMatch(/Couldn't read the article before changing it.*Nothing was sent/);
     expect(calls.filter((x) => x.method === "PATCH")).toHaveLength(1);
     expect(files(dir)).toHaveLength(1);
   });
@@ -128,11 +138,12 @@ describe("backups before changes", () => {
     expect(files(dir)).toHaveLength(0);
   });
 
-  it("backs up from a single read on an item's first edit", async () => {
+  it("backs up before the edit, and the backup holds the text as it was", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
     const c = await connect({}, dir);
     await c.callTool({ name: "worldanvil_update_article", arguments: { article_id: ARTICLE, content: "v2" } });
-    // One read before the edit (the backup); the last GET is the read-back after saving.
+    // The tool reads the article (to see whether anything would change); that read
+    // is the backup; the edit is sent; the last GET is the read-back after saving.
     expect(calls.filter((x) => x.endpoint.startsWith("/article?")).map((x) => x.method)).toEqual(["GET", "PATCH", "GET"]);
     expect(JSON.parse(readFileSync(files(dir)[0], "utf8")).data.content).toBe("Original text v1");
   });
@@ -142,6 +153,93 @@ describe("backups before changes", () => {
     const r = await c.callTool({ name: "worldanvil_update_article", arguments: { article_id: ARTICLE, content: "v2" } });
     expect(r.content[0].text).toMatch(/backups aren't configured/);
     expect(calls.some((x) => x.method === "PATCH")).toBe(false);
+  });
+
+  describe("a read from the last few seconds stands in for the backup read", () => {
+    const articleCalls = () => calls.filter((x) => x.endpoint.startsWith("/article?")).map((x) => x.method);
+    const get = (c) => c.callTool({ name: "worldanvil_get_article", arguments: { article_id: ARTICLE } });
+    const setIcon = (c, extra = {}) =>
+      c.callTool({ name: "worldanvil_update_article", arguments: { article_id: ARTICLE, icon: "fa-crown", ...extra } });
+    const backupText = (dir) => JSON.parse(readFileSync(files(dir).at(-1), "utf8")).data.content;
+
+    it("an edit just after a read backs up that read, without reading again", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
+      const c = await connect({}, dir);
+      await get(c);
+      const r = await setIcon(c);
+      expect(r.isError).toBeFalsy();
+      expect(articleCalls()).toEqual(["GET", "PATCH"]);
+      expect(files(dir)).toHaveLength(1);
+      expect(backupText(dir)).toBe("Original text v1");
+    });
+
+    it("the remembered read is used once: a second edit reads afresh", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
+      const c = await connect({ item_backup_keep: 5 }, dir);
+      await get(c);
+      await setIcon(c);
+      article = { ...article, content: "Text after the first edit" };
+      await setIcon(c);
+      expect(articleCalls()).toEqual(["GET", "PATCH", "GET", "PATCH"]);
+      const texts = files(dir).map((f) => JSON.parse(readFileSync(f, "utf8")).data.content).sort();
+      expect(texts).toEqual(["Original text v1", "Text after the first edit"]);
+    });
+
+    it("a read older than 15 seconds is not used", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
+      const c = await connect({}, dir);
+      const start = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+      await get(c);
+      clock.mockReturnValue(start + 14_000);
+      article = { ...article, content: "Edited elsewhere meanwhile" };
+      clock.mockReturnValue(start + 16_000);
+      await setIcon(c);
+      clock.mockRestore();
+      expect(articleCalls()).toEqual(["GET", "GET", "PATCH"]);
+      expect(backupText(dir)).toBe("Edited elsewhere meanwhile");
+    });
+
+    it("fresh_backup reads afresh even straight after a read", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
+      const c = await connect({}, dir);
+      await get(c);
+      article = { ...article, content: "Edited elsewhere meanwhile" };
+      await setIcon(c, { fresh_backup: true });
+      expect(articleCalls()).toEqual(["GET", "GET", "PATCH"]);
+      expect(backupText(dir)).toBe("Edited elsewhere meanwhile");
+    });
+
+    it("fresh_backup on a text update: read, backup read, edit, read-back", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
+      const c = await connect({}, dir);
+      await c.callTool({
+        name: "worldanvil_update_article",
+        arguments: { article_id: ARTICLE, content: "v2", fresh_backup: true },
+      });
+      expect(articleCalls()).toEqual(["GET", "GET", "PATCH", "GET"]);
+    });
+
+    it("a delete always reads afresh for its backup", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
+      const c = await connect({}, dir);
+      await get(c);
+      article = { ...article, content: "Edited elsewhere meanwhile" };
+      const r = await c.callTool({ name: "worldanvil_delete_article", arguments: { article_id: ARTICLE } });
+      expect(r.isError).toBeFalsy();
+      expect(articleCalls()).toEqual(["GET", "GET", "DELETE"]);
+      expect(backupText(dir)).toBe("Edited elsewhere meanwhile");
+    });
+
+    it("the backup is the copy as it was read, not as the tool may have altered it", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "wa-bk-"));
+      const c = await connect({}, dir);
+      const shared = article;
+      await get(c);
+      shared.content = "Changed in memory after the read";
+      await setIcon(c);
+      expect(backupText(dir)).toBe("Original text v1");
+    });
   });
 
   it("does not back up reads or creates", async () => {

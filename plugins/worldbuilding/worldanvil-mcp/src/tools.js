@@ -344,9 +344,49 @@ export function getToolDefinitions() {
       },
     },
     {
+      name: "worldanvil_compare_article",
+      description:
+        "Compare new lore with an existing article WITHOUT changing anything. Give the article and the text you would send (content, author_notes, or both), written exactly as for worldanvil_update_article. The comparison is by what a reader sees, not by how the text is stored, so an article stored in an older form is not reported as all-changed. `status` is `same` (World Anvil holds exactly this), `format_only` (reads the same, stored in an older form: update it to bring it up to date) or `changed`, with the blocks `reworded` (was / now), `removed` (only on World Anvil: an update would delete them, e.g. an edit made on the website or an embedded image) and `added`. The answer's `stamp` is the article's change date: pass it to worldanvil_update_article as if_unchanged_since.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          article_id: { type: "string", description: "The ID of the article to compare with" },
+          content: { type: "string", description: "The main text you would send" },
+          author_notes: { type: "string", description: "The author notes you would send" },
+          format: {
+            type: "string",
+            enum: ["markdown", "bbcode"],
+            description: "How content and author_notes are written, as for worldanvil_update_article (default markdown).",
+          },
+        },
+        required: ["article_id"],
+      },
+    },
+    {
+      name: "worldanvil_reformat_article",
+      description:
+        "Bring an article stored in an older form up to the form World Anvil's editor writes today, without changing a word. It rewrites the stored main text and author notes themselves (old list items, headings without anchors, bare lines, old-style web links); no new text is given. It saves only if a reader would see no difference, and refuses otherwise, saying what would differ. An article already in the editor's form is left alone. A backup is taken first, privacy is not touched, and the answer's `stored` confirms what was saved. Use dry_run to see what would happen without saving. This does not restyle or rewrite lore (adding a summary or a contents list is a change of wording: use worldanvil_compare_article and worldanvil_update_article for that).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          article_id: { type: "string", description: "The ID of the article to bring up to date" },
+          dry_run: {
+            type: "boolean",
+            description: "true: say what would be rewritten, and send nothing",
+          },
+          fresh_backup: {
+            type: "boolean",
+            description:
+              "true: read the article afresh from World Anvil for the backup taken before this change. Normally the read made a moment earlier (at most 15 seconds old) is used as the backup, which saves a request. Ask for a fresh one if the article may have just been edited somewhere else.",
+          },
+        },
+        required: ["article_id"],
+      },
+    },
+    {
       name: "worldanvil_update_article",
       description:
-        "Update an existing article in WorldAnvil. A new title is refused if another article in the world already has it. To link to another article in the same world write [[Its Title]] in content or author_notes: it becomes a World Anvil mention (capitals and spacing aside; the answer's `links` says what was linked). To display other words for the link write [[Its Title|words to show]]. See unresolved_links for names that have no article. After saving, the article is read back: the answer's `stored` says whether the title and text World Anvil now holds are exactly what was sent, or warns where they differ (nothing is retried or undone). An opening heading in content that only repeats the title is left out (the answer says so in `title_heading`). Only what is passed changes: content replaces the main text, author_notes replaces the Author Notes section, and each leaves the other alone. Markdown in content, author_notes and template-specific fields is converted to the BBCode World Anvil's own editor writes; BBCode already in the text is left as it is. Can set a different icon or reset it to the template's own. Cannot change an article's template, except to a variant of the same one (Organization to Country, Military or Religion; Character to God/Deity).",
+        "Update an existing article in WorldAnvil. A new title is refused if another article in the world already has it. If what is given is already exactly what World Anvil holds, nothing is sent (the answer says `unchanged`). Compare first with worldanvil_compare_article and pass its stamp as if_unchanged_since. To link to another article in the same world write [[Its Title]] in content or author_notes: it becomes a World Anvil mention (capitals and spacing aside; the answer's `links` says what was linked). To display other words for the link write [[Its Title|words to show]]. See unresolved_links for names that have no article. After saving, the article is read back: the answer's `stored` says whether the title and text World Anvil now holds are exactly what was sent, or warns where they differ (nothing is retried or undone). An opening heading in content that only repeats the title is left out (the answer says so in `title_heading`). Only what is passed changes: content replaces the main text, author_notes replaces the Author Notes section, and each leaves the other alone. Markdown in content, author_notes and template-specific fields is converted to the BBCode World Anvil's own editor writes; BBCode already in the text is left as it is. Can set a different icon or reset it to the template's own. Cannot change an article's template, except to a variant of the same one (Organization to Country, Military or Religion; Character to God/Deity).",
       inputSchema: {
         type: "object",
         properties: {
@@ -368,6 +408,16 @@ export function getToolDefinitions() {
             enum: ["markdown", "bbcode"],
             description:
               "How content and author_notes are written. \"markdown\" (default): converted to the BBCode World Anvil's own editor writes. \"bbcode\": sent exactly as written, nothing converted.",
+          },
+          fresh_backup: {
+            type: "boolean",
+            description:
+              "true: read the article afresh from World Anvil for the backup taken before this change. Normally the read made a moment earlier (at most 15 seconds old) is used as the backup, which saves a request. Ask for a fresh one if the article may have just been edited somewhere else.",
+          },
+          if_unchanged_since: {
+            type: "string",
+            description:
+              "The `stamp` from worldanvil_compare_article. If the article has changed on World Anvil since then (an edit made on the website, say), the update is refused and nothing is sent, so that edit is not overwritten. Always pass it when updating lore that was compared first.",
           },
           unresolved_links: {
             type: "string",

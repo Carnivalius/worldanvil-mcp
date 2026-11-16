@@ -28,6 +28,7 @@ import {
   titleKey,
   worldOutline,
 } from "./listing.js";
+import { compareAsRead, toEditorForm } from "./reader-view.js";
 import { backupWorld } from "./access/world-backup.js";
 import { backupItem, compareBackup, listBackups, restoreItem, searchBackups } from "./access/lookback.js";
 
@@ -207,6 +208,32 @@ async function confirmArticlePrivate(client, created) {
   } catch (e) {
     return warn(`Couldn't confirm it is private (${e.message}).`);
   }
+}
+
+/**
+ * An article's change date as one plain string (World Anvil gives an
+ * object with a `date` inside). Used as a stamp: "the article as it was
+ * when I looked".
+ */
+function stampOf(updateDate) {
+  if (updateDate == null) return null;
+  if (typeof updateDate === "string") return updateDate.trim() || null;
+  if (typeof updateDate === "object" && typeof updateDate.date === "string") return updateDate.date;
+  return JSON.stringify(updateDate);
+}
+
+/** True when sending `data` would change nothing World Anvil holds. */
+function nothingToChange(data, current) {
+  const keys = Object.keys(data);
+  if (keys.length === 0 || !current) return false;
+  return keys.every((key) => {
+    const want = data[key];
+    const have = current[key];
+    if (typeof want === "string") return typeof have === "string" && have === want;
+    if (key === "category" && want?.id)
+      return String(have?.id ?? "").toLowerCase() === String(want.id).toLowerCase();
+    return false;
+  });
 }
 
 const CHECK_LABELS = { title: "title", content: "main text", authornotes: "author notes" };
@@ -521,6 +548,52 @@ export async function handleToolCall(name, args, client) {
           // A rename must not take a title another article already has.
           await refuseDuplicateTitle(client, await worldId(), args.title, args.article_id, await articles());
         }
+
+        // The article as it stands, for the two checks below. Read only
+        // when text or a stamp was given: an icon change needs neither.
+        const sendsText = ["title", "content", "authornotes", ...Object.keys(templateFields ?? {})].some(
+          (key) => typeof data[key] === "string",
+        );
+        const hasStamp = args.if_unchanged_since !== undefined && args.if_unchanged_since !== null;
+        let now = null;
+        if (sendsText || hasStamp) {
+          try {
+            now = await current();
+          } catch (e) {
+            throw new Error(`Couldn't read the article before changing it (${e.message}). Nothing was sent.`);
+          }
+        }
+
+        // Changed on World Anvil since it was compared? Then someone has
+        // edited it there, and saving would wipe that edit out.
+        if (hasStamp) {
+          const expected = stampOf(args.if_unchanged_since);
+          const actual = stampOf(now?.updateDate);
+          if (!expected || expected !== actual)
+            throw new Error(
+              `This article has changed on World Anvil since it was compared (then ${expected ?? "unknown"}, now ${actual ?? "unknown"}), ` +
+                "most likely an edit made on the website. Nothing was sent. Run worldanvil_compare_article again, " +
+                "show the user both versions (what World Anvil holds now and the new text), agree one combined text " +
+                "with them, and update with that and the new stamp.",
+            );
+        }
+
+        // Already exactly what World Anvil holds: send nothing, so no
+        // backup is taken and the change date does not move.
+        if (nothingToChange(data, now)) {
+          return jsonResponse({
+            id: args.article_id,
+            title: now?.title,
+            unchanged: true,
+            note: "Nothing was sent: what was given is already exactly what World Anvil holds. No backup was taken and the article's change date has not moved.",
+            stamp: stampOf(now?.updateDate),
+            ...(text.note ? { title_heading: text.note } : {}),
+            ...(text.links ? { links: text.links } : {}),
+          });
+        }
+        // fresh_backup: have the backup read afresh from World Anvil,
+        // not taken from the read made a moment ago.
+        if (args.fresh_backup) client.forgetRecentReads?.();
         const updated = await client.updateArticle(args.article_id, data);
         const stored = await storedCheck(client, args.article_id, data, [
           "title",
@@ -533,6 +606,106 @@ export async function handleToolCall(name, args, client) {
           ...(stored ? { stored } : {}),
           ...(text.note ? { title_heading: text.note } : {}),
           ...(text.links ? { links: text.links } : {}),
+        });
+      }
+
+      case "worldanvil_compare_article": {
+        if (args.content === undefined && args.author_notes === undefined)
+          throw new Error("Give content, author_notes, or both, to compare with the article.");
+        const now = await client.getArticle(args.article_id);
+        // The same preparation an update would do, so the comparison is
+        // with exactly what an update would send. Names that can't be
+        // linked are left as text here: this tool only looks.
+        const text = await articleText(
+          { unresolved_links: "plain", ...args },
+          String(args.article_id ?? ""),
+          client,
+          { title: now?.title, worldId: now?.world?.id, selfId: args.article_id },
+        );
+        const parts = {};
+        if (text.fields.content !== undefined)
+          parts.main_text = compareAsRead(now?.content ?? "", text.fields.content);
+        if (text.fields.authornotes !== undefined)
+          parts.author_notes = compareAsRead(now?.authornotes ?? "", text.fields.authornotes);
+        const statuses = Object.values(parts).map((p) => p.status);
+        const overall = statuses.includes("changed")
+          ? "changed"
+          : statuses.includes("format_only")
+            ? "format_only"
+            : "same";
+        const unlinked = (text.links?.plain ?? []).filter((p) => p.why !== "the article itself");
+        return jsonResponse({
+          article_id: args.article_id,
+          title: now?.title,
+          state: now?.state ?? null,
+          stamp: stampOf(now?.updateDate),
+          status: overall,
+          ...parts,
+          ...(text.note ? { title_heading: text.note } : {}),
+          ...(text.links ? { links: text.links } : {}),
+          ...(unlinked.length
+            ? { unlinked_names: `An update would refuse these [[links]] unless unresolved_links is "plain": ${unlinked.map((p) => p.name).join(", ")}.` }
+            : {}),
+          note:
+            overall === "same"
+              ? "World Anvil already holds exactly this text. An update would send nothing."
+              : overall === "format_only"
+                ? "The article reads the same as this text but is stored in an older form. Updating it rewrites it in the form World Anvil's editor uses today; a reader sees no difference."
+                : "A reader would see a difference. `reworded` pairs a block as stored (was) with the new one (now); `removed` are blocks only World Anvil holds, which an update would delete; `added` are new. " +
+                  "Nothing has been changed. To update, pass this `stamp` as if_unchanged_since so an edit made on the website in the meantime is not overwritten.",
+        });
+      }
+
+      case "worldanvil_reformat_article": {
+        const now = await client.getArticle(args.article_id);
+        // The same anchor seed an update uses, so headings get the ids a
+        // later upload of the same lore would give them.
+        const seed = String(args.article_id ?? "");
+        const parts = {
+          main_text: toEditorForm(now?.content, { anchorSeed: seed, paragraphs: true }),
+          author_notes: toEditorForm(now?.authornotes, { anchorSeed: `${seed} notes`, paragraphs: "auto" }),
+        };
+        const data = {};
+        if (parts.main_text.status === "reformatted") data.content = parts.main_text.text;
+        if (parts.author_notes.status === "reformatted") data.authornotes = parts.author_notes.text;
+        // The answer says what happened to each part, not the text itself.
+        const report = (p) => {
+          const { text, ...rest } = p;
+          return rest;
+        };
+        const answer = {
+          id: args.article_id,
+          title: now?.title,
+          state: now?.state ?? null,
+          main_text: report(parts.main_text),
+          author_notes: report(parts.author_notes),
+        };
+        const refused = Object.values(parts).some((p) => p.status === "refused");
+        if (Object.keys(data).length === 0)
+          return jsonResponse({
+            ...answer,
+            status: refused ? "refused" : "current",
+            note: refused
+              ? "Nothing was sent. See `why` for the part that could not be rewritten."
+              : "Already in the form World Anvil's editor writes. Nothing was sent.",
+          });
+        if (args.dry_run)
+          return jsonResponse({
+            ...answer,
+            status: "would_reformat",
+            note: "Dry run: nothing was sent. Without dry_run the parts marked reformatted would be rewritten in the editor's form; a reader would see no difference.",
+          });
+        if (args.fresh_backup) client.forgetRecentReads?.();
+        const updated = await client.updateArticle(args.article_id, data);
+        const stored = await storedCheck(client, args.article_id, data, ["content", "authornotes"]);
+        return jsonResponse({
+          ...answer,
+          title: updated?.title ?? now?.title,
+          status: "reformatted",
+          ...(stored ? { stored } : {}),
+          note:
+            "Rewritten in the form World Anvil's editor writes. The wording is untouched: it was checked that a reader sees no difference. A backup of the earlier text was taken first." +
+            (refused ? " One part could not be rewritten: see its `why`." : ""),
         });
       }
 

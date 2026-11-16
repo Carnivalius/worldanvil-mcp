@@ -103,8 +103,8 @@ describe("filterTools", () => {
   it("should filter to content group", () => {
     const groups = new Set(["core", "content"]);
     const result = filterTools(ALL_TOOLS, groups);
-    // Core (12) + articles (5) + find articles (1) + world outline (1) + categories (5) = 24
-    expect(result.length).toBe(24);
+    // Core (12) + articles (5) + find, compare and reformat article (3) + world outline (1) + categories (5) = 26
+    expect(result.length).toBe(26);
   });
 
   it("should filter with a preset", () => {
@@ -153,7 +153,7 @@ describe("GROUP_RESOURCES completeness", () => {
     const unmapped = [];
     for (const tool of ALL_TOOLS) {
       const resource = tool.name.replace(
-        /^worldanvil_(get|list|find|create|update|delete|backup|search|compare|restore)_/,
+        /^worldanvil_(get|list|find|create|update|delete|backup|search|compare|restore|reformat)_/,
         "",
       );
       if (!resourceToGroup.has(resource)) {

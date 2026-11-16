@@ -480,7 +480,7 @@ describe("one title, one article", () => {
     const client = articleClient(world(mountains));
     await call("worldanvil_update_article", { article_id: "a1", content: "New text." }, client);
     expect(client.listArticles).not.toHaveBeenCalled();
-    expect(readsBeforeSave(client)).toBe(0);
+    expect(readsBeforeSave(client)).toBe(1);
   });
 
   it("refuses a rename when the article's world can't be told", async () => {
@@ -585,10 +585,10 @@ describe("an opening heading that repeats the title", () => {
       expect(kept.updateArticle.mock.calls[0][1].content).toMatch(/^\[h1\|/);
     });
 
-    it("does not read the article when the text opens with no heading", async () => {
+    it("reads the article only once when the text opens with no heading", async () => {
       const client = existing();
       await call("worldanvil_update_article", { article_id: "a1", content: "Plain opening.\n\n# Iron Mountains" }, client);
-      expect(readsBeforeSave(client)).toBe(0);
+      expect(readsBeforeSave(client)).toBe(1);
     });
   });
 });
