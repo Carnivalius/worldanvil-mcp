@@ -30,6 +30,7 @@ import {
 } from "./listing.js";
 import { compareAsRead, toEditorForm } from "./reader-view.js";
 import { backupWorld } from "./access/world-backup.js";
+import { actionsAnyWorldAllows } from "./access/guard.js";
 import { backupItem, compareBackup, listBackups, restoreItem, searchBackups } from "./access/lookback.js";
 
 /**
@@ -384,6 +385,9 @@ export async function handleToolCall(name, args, client) {
           );
         // Private by default: the world and every article later made in it.
         // This tool never makes anything public; that is done on the website.
+        // The tool kinds loaded for this session, before the new world
+        // is added to the settings.
+        const loadedBefore = client.access ? actionsAnyWorldAllows(client.access.settings) : null;
         const created = await client.createWorld({
           title: args.title,
           state: "private",
@@ -408,7 +412,20 @@ export async function handleToolCall(name, args, client) {
             "WARNING: couldn't confirm this world is private " +
             `(${e.message}). Check its privacy on the World Anvil website before adding anything to it.`;
         }
-        return jsonResponse({ ...created, ...(note ? { access_settings: note } : {}), privacy });
+        // A level that allows more than any world did when this session
+        // began: the tools for it were never loaded here.
+        const nowAllowed = client.access ? actionsAnyWorldAllows(client.access.settings) : [];
+        const newKinds = loadedBefore ? nowAllowed.filter((a) => !loadedBefore.includes(a)) : [];
+        const tools = newKinds.length
+          ? "This session was started without the tools this world's level now allows " +
+            `(${newKinds.join(", ")}). Ask the user to start a new session to work in it.`
+          : undefined;
+        return jsonResponse({
+          ...created,
+          ...(note ? { access_settings: note } : {}),
+          ...(tools ? { tools } : {}),
+          privacy,
+        });
       }
 
       case "worldanvil_update_world": {

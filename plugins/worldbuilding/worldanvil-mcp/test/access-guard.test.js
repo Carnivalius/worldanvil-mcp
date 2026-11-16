@@ -349,6 +349,68 @@ describe("server: tools and settings", () => {
     expect(names({ allow_create_worlds: false })).not.toContain("worldanvil_create_world");
     expect(names({ allow_delete_worlds: true })).toContain("worldanvil_delete_world");
   });
+  it("leaves out the tools no world's access level could use", () => {
+    // Nothing above read_only anywhere: no create, change or delete tools.
+    const readOnly = names({
+      allow_only: true,
+      allow_create_worlds: false,
+      world_list: { "My Epic Saga": "read_only", "Old Campaign": "blocked" },
+    });
+    expect(readOnly).toContain("worldanvil_get_article");
+    expect(readOnly).toContain("worldanvil_find_articles");
+    expect(readOnly).toContain("worldanvil_compare_article");
+    expect(readOnly).toContain("worldanvil_backup_world");
+    expect(readOnly).toContain("worldanvil_list_backups");
+    for (const t of readOnly) expect(t).not.toMatch(/^worldanvil_(create|update|reformat|restore|delete)_/);
+
+    // One edit_only world: everything but the delete tools.
+    const editOnly = names({
+      allow_only: true,
+      allow_create_worlds: false,
+      world_list: { "My Epic Saga": "read_only", "Lore Notes": "edit_only" },
+    });
+    expect(editOnly).toContain("worldanvil_create_article");
+    expect(editOnly).toContain("worldanvil_update_article");
+    expect(editOnly).toContain("worldanvil_reformat_article");
+    expect(editOnly).toContain("worldanvil_restore_item");
+    expect(editOnly.filter((t) => t.startsWith("worldanvil_delete_"))).toEqual([]);
+
+    // One full_edit world: nothing is left out.
+    const full = names({ allow_only: true, world_list: { "My Epic Saga": "full_edit" } });
+    expect(full).toContain("worldanvil_delete_article");
+  });
+  it("counts the default level and a new world's level as worlds that could exist", () => {
+    // Unlisted worlds get default_access, so its tools stay.
+    expect(names({ default_access: "edit_only", allow_create_worlds: false })).toContain("worldanvil_update_article");
+    expect(names({ default_access: "read_only", allow_create_worlds: false })).not.toContain("worldanvil_update_article");
+    // With allow_only on, the default level applies to nothing.
+    expect(
+      names({ allow_only: true, default_access: "full_edit", allow_create_worlds: false, world_list: { Twin: "read_only" } }),
+    ).not.toContain("worldanvil_update_article");
+    // A world made in this session would get new_world_access.
+    const making = names({ allow_only: true, new_world_access: "edit_only", world_list: { "My Epic Saga": "read_only" } });
+    expect(making).toContain("worldanvil_create_world");
+    expect(making).toContain("worldanvil_create_article");
+    expect(making).not.toContain("worldanvil_delete_article");
+  });
+  it("keeps the two world tools on their own switches, whatever the levels", () => {
+    const s = { allow_only: true, allow_delete_worlds: true, new_world_access: "read_only", world_list: { "My Epic Saga": "read_only" } };
+    expect(names(s)).toContain("worldanvil_create_world");
+    expect(names(s)).toContain("worldanvil_delete_world");
+    expect(names(s)).not.toContain("worldanvil_create_article");
+  });
+  it("says on the world list which kinds of tool are not loaded, and why", () => {
+    const describe = (s) =>
+      visibleTools(validateSettings(s), null).find((x) => x.name === "worldanvil_list_worlds").description;
+    expect(describe({})).toMatch(/Each one carries `access`/);
+    expect(describe({})).not.toMatch(/not loaded/);
+    expect(
+      describe({ allow_only: true, allow_create_worlds: false, world_list: { "My Epic Saga": "read_only" } }),
+    ).toMatch(/tools for creating, changing and deleting items are not loaded.*a new session is needed/);
+    expect(
+      describe({ allow_only: true, allow_create_worlds: false, world_list: { "My Epic Saga": "edit_only" } }),
+    ).toMatch(/tools for deleting items are not loaded/);
+  });
   it("tells the AI to confirm the new world's access level", () => {
     const t = visibleTools(validateSettings({ new_world_access: "edit_only" }), null).find(
       (x) => x.name === "worldanvil_create_world",
@@ -381,6 +443,11 @@ describe("server: end to end (fake World Anvil)", () => {
     return client;
   }
   const text = (r) => r.content[0].text;
+
+  it("tells every session, on connecting, to check a world's access level first", async () => {
+    const c = await connect({});
+    expect(c.getInstructions()).toMatch(/call worldanvil_list_worlds.*`access`.*needs a new session/);
+  });
 
   it("refuses hidden tools even if called directly", async () => {
     const c = await connect({});
@@ -477,6 +544,27 @@ describe("server: end to end (fake World Anvil)", () => {
     expect(out.entities.find((w) => w.id === W.camp).access).toBe("blocked");
   });
 
+  it("create_world asks for a new session when the new level allows tools that were not loaded", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-access-"));
+    const file = join(dir, "access.json");
+    const settings = { allow_only: true, new_world_access: "read_only", world_list: { "My Epic Saga": "read_only" } };
+    writeFileSync(file, JSON.stringify(settings));
+    WORLDS.push({ id: "99999999-9999-4999-8999-999999999999", title: "Brand New World" });
+    try {
+      const c = await connect(settings, file);
+      const before = (await c.listTools()).tools.map((t) => t.name);
+      expect(before).not.toContain("worldanvil_create_article");
+      const r = await c.callTool({
+        name: "worldanvil_create_world",
+        arguments: { title: "Brand New World", access_level: "edit_only" },
+      });
+      expect(r.isError).toBeFalsy();
+      expect(JSON.parse(text(r)).tools).toMatch(/\(create, update\)\. Ask the user to start a new session/);
+    } finally {
+      WORLDS.pop();
+    }
+  });
+
   it("create_world requires a level and adds the world to the settings file", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wa-access-"));
     const file = join(dir, "access.json");
@@ -494,6 +582,8 @@ describe("server: end to end (fake World Anvil)", () => {
       expect(JSON.parse(text(r)).access_settings).toBe(
         'Added to your access settings as "Brand New World": edit_only',
       );
+      // Every kind of tool was already loaded, so no new session is asked for.
+      expect(JSON.parse(text(r)).tools).toBeUndefined();
       // Private by default: asked for in the create request itself.
       const put = calls.find((x) => x.method === "PUT" && x.endpoint === "/world");
       expect(put.body).toEqual({ title: "Brand New World", state: "private", articlesPrivateOnCreation: true });

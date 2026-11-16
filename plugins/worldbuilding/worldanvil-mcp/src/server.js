@@ -17,9 +17,9 @@ const { version: PKG_VERSION } = require("../package.json");
 import { WorldAnvilClient } from "./api-client.js";
 import { getToolDefinitions } from "./tools.js";
 import { handleToolCall } from "./handlers.js";
-import { parseToolGroups, filterTools } from "./tool-groups.js";
+import { parseToolGroups, filterTools, toolAction } from "./tool-groups.js";
 import { backupFolderFor, loadSettings } from "./access/config.js";
-import { WorldAccess, guardClient } from "./access/guard.js";
+import { WorldAccess, guardClient, actionsAnyWorldAllows } from "./access/guard.js";
 import { Backups } from "./access/backup.js";
 import { dirname, isAbsolute, join } from "path";
 
@@ -47,22 +47,64 @@ export const ALWAYS_DISABLED_TOOLS = new Set([
  * world access settings. Tools that are switched off are not listed at all.
  */
 export function visibleTools(settings, enabledGroups) {
+  const missing = actionsNotLoaded(settings);
   return filterTools(getToolDefinitions(), enabledGroups)
     .filter((t) => !ALWAYS_DISABLED_TOOLS.has(t.name))
     .filter((t) => t.name !== "worldanvil_create_world" || settings.allow_create_worlds)
     .filter((t) => t.name !== "worldanvil_delete_world" || settings.allow_delete_worlds)
-    .map((t) =>
-      t.name === "worldanvil_create_world"
-        ? {
-            ...t,
-            description:
-              `${t.description} Before calling, ask the user which access level the new ` +
-              `world should have (suggested: ${settings.new_world_access}). The world is ` +
-              `added to their access settings at that level.`,
-          }
-        : t,
-    );
+    // A tool no world's access level could let through is not listed: it
+    // would only take up room and be refused. The two world tools above
+    // have their own switches.
+    .filter((t) => WORLD_SWITCH_TOOLS.has(t.name) || !missing.includes(toolAction(t.name)))
+    .map((t) => {
+      if (t.name === "worldanvil_create_world")
+        return {
+          ...t,
+          description:
+            `${t.description} Before calling, ask the user which access level the new ` +
+            `world should have (suggested: ${settings.new_world_access}). The world is ` +
+            `added to their access settings at that level.`,
+        };
+      if (t.name === "worldanvil_list_worlds" && missing.length)
+        return { ...t, description: `${t.description} ${notLoadedNote(missing)}` };
+      return t;
+    });
 }
+
+/** The two tools switched by their own settings, not by a world's level. */
+const WORLD_SWITCH_TOOLS = new Set(["worldanvil_create_world", "worldanvil_delete_world"]);
+
+const ACTION_TOOL_WORDS = { create: "creating", update: "changing", delete: "deleting" };
+
+/** The write actions no world could be allowed under these settings. */
+export function actionsNotLoaded(settings) {
+  const allowed = actionsAnyWorldAllows(settings);
+  return ["create", "update", "delete"].filter((a) => !allowed.includes(a));
+}
+
+/** One sentence for the session: which kinds of tool are absent, and why. */
+export function notLoadedNote(missing) {
+  if (!missing.length) return "";
+  const kinds = missing.map((a) => ACTION_TOOL_WORDS[a]);
+  const list = kinds.length > 1 ? `${kinds.slice(0, -1).join(", ")} and ${kinds.at(-1)}` : kinds[0];
+  return (
+    `In this session the tools for ${list} items are not loaded, because no world's access level allows it. ` +
+    "If the user changes their access settings, a new session is needed to load them."
+  );
+}
+
+/**
+ * Sent to every session when it connects, so the access check is not
+ * something a session has to stumble on.
+ */
+export const SERVER_INSTRUCTIONS =
+  "Before planning any change to a World Anvil world, call worldanvil_list_worlds. Each world carries `access`, " +
+  "the level the user's own settings give it: full_edit (read, create, change, delete), edit_only (no deleting), " +
+  "read_only (read only), blocked or \"not on allow list\" (nothing). Plan only what the level allows, and say so " +
+  "early if it does not allow what the user asked for. Tools that no world's level could use are not loaded in the " +
+  "session. Only the user can change a level, in their settings file; the server reads it when it starts, so a " +
+  "changed level needs a new session. A refusal that starts \"Access denied\" is the user's settings at work: " +
+  "report it, do not look for a way round.";
 
 /** Missing required arguments, per the tool's input schema. */
 export function missingArgs(tool, args) {
@@ -119,6 +161,7 @@ export function createServer(config = {}) {
       capabilities: {
         tools: {},
       },
+      instructions: SERVER_INSTRUCTIONS,
     },
   );
 

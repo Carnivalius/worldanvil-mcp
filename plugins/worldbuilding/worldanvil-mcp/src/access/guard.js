@@ -29,6 +29,22 @@ const PERMITS = {
   blocked: new Set(),
 };
 
+/**
+ * Every action that at least one world could be allowed under these
+ * settings: the levels in world_list, the default level (unless only
+ * listed worlds are allowed), and the level suggested for a new world
+ * (when creating worlds is on). Works from the settings alone; nothing is
+ * read from World Anvil. Used to leave out tools no world could use.
+ */
+export function actionsAnyWorldAllows(settings) {
+  const levels = new Set(Object.values(settings?.world_list ?? {}));
+  if (!settings?.allow_only) levels.add(settings?.default_access);
+  if (settings?.allow_create_worlds) levels.add(settings?.new_world_access);
+  const actions = new Set();
+  for (const level of levels) for (const a of PERMITS[level] ?? []) actions.add(a);
+  return ["read", "create", "update", "delete"].filter((a) => actions.has(a));
+}
+
 const ACTION_WORDS = {
   read: "read",
   create: "create items in",

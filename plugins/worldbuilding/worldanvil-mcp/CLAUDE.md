@@ -2,6 +2,19 @@
 
 This document provides guidance for AI agents working with the WorldAnvil MCP server. Follow these patterns to ensure effective worldbuilding that aligns with WorldAnvil best practices.
 
+## First: check what you may do
+
+Before planning any change to a world, call `worldanvil_list_worlds`. Each world carries `access`, the level the user's own settings give it:
+
+| `access` | Allowed |
+|---|---|
+| `full_edit` | read, create, change, delete |
+| `edit_only` | read, create, change (no deleting) |
+| `read_only` | read only |
+| `blocked` / `not on allow list` | nothing |
+
+Plan only what the level allows, and say so early if it does not cover what the user asked for. Tools that no world's level could use are not loaded at all. Only the user can change a level, in their settings file; the server reads it when it starts, so a changed level needs a new session. A refusal starting "Access denied" is the user's settings at work: report it, do not look for a way round.
+
 ## Quick Reference
 
 ```

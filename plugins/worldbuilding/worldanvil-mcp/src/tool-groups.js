@@ -186,4 +186,23 @@ export function filterTools(tools, enabledGroups) {
   return tools.filter((tool) => enabledGroups.has(getToolGroup(tool.name)));
 }
 
+/** What each tool-name verb does to a world. Anything else only reads. */
+const VERB_ACTIONS = {
+  create: "create",
+  update: "update",
+  reformat: "update",
+  restore: "update",
+  delete: "delete",
+};
+
+/**
+ * Whether a tool reads, creates, updates or deletes, going by its name.
+ * @param {string} toolName - e.g. 'worldanvil_delete_article'
+ * @returns {"read"|"create"|"update"|"delete"}
+ */
+export function toolAction(toolName) {
+  const verb = /^worldanvil_([a-z]+)_/.exec(toolName)?.[1];
+  return VERB_ACTIONS[verb] ?? "read";
+}
+
 export { GROUP_RESOURCES, PRESETS };

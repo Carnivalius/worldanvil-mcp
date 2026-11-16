@@ -56,6 +56,8 @@ What the tool may do in each world (full edit, edit only, read only or blocked),
 
 `WA_TOOL_GROUPS` limits which tools are loaded (default: all). Groups: core, content, images, campaign, maps, timeline, blocks, manuscripts, canvas, variables, social, rpg. Presets: all, standard, worldbuilding, writing, gamemaster.
 
+Tools that no world's access level could use are left out as well: with every world read-only, the tools that create, change and delete are not loaded; with nothing above `edit_only`, the delete tools are not loaded. The access settings are read when the server starts, so after changing them, start a new session.
+
 ## Features
 
 ### Content Management

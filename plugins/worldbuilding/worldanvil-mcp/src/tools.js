@@ -19,7 +19,11 @@ export function getToolDefinitions() {
     },
     {
       name: "worldanvil_list_worlds",
-      description: "List all worlds belonging to the authenticated user",
+      description:
+        "List all worlds belonging to the authenticated user. Each one carries `access`, the level the user's access settings give it: " +
+        "full_edit (read, create, change, delete), edit_only (read, create, change; no deleting), read_only (read only), " +
+        "blocked or \"not on allow list\" (nothing). Call this before planning any change, to see what is allowed in the world; " +
+        "only the user can change a level, in their settings file, and the server reads that file when it starts.",
       inputSchema: { type: "object", properties: {} },
     },
     {
