@@ -176,14 +176,19 @@ export function titleKey(title) {
   return String(title ?? "").normalize("NFC").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+/** Every article in the world, as World Anvil lists them. */
+export function allArticles(client, worldId) {
+  return listAll((o) => client.listArticles(worldId, o));
+}
+
 /**
  * Every article in the world whose title is the same as `title`
  * (see titleKey). Reads the world's whole article list.
  */
-export async function articlesWithTitle(client, worldId, title) {
+export async function articlesWithTitle(client, worldId, title, articles = null) {
   const key = titleKey(title);
   if (!key) return [];
-  const articles = await listAll((o) => client.listArticles(worldId, o));
+  articles = articles ?? (await allArticles(client, worldId));
   return articles.filter((a) => titleKey(a?.title) === key).map(articleLine);
 }
 
@@ -192,9 +197,9 @@ export async function articlesWithTitle(client, worldId, title) {
  * 2026-11-16: no override; the way forward is a different title).
  * `exceptId` is the article being renamed, which may keep its own title.
  */
-export async function refuseDuplicateTitle(client, worldId, title, exceptId = null) {
+export async function refuseDuplicateTitle(client, worldId, title, exceptId = null, articles = null) {
   if (!worldId) throw new Error("Could not tell which world this article is in, so its title could not be checked against the others. Nothing was sent.");
-  const clashes = (await articlesWithTitle(client, worldId, title)).filter(
+  const clashes = (await articlesWithTitle(client, worldId, title, articles)).filter(
     (a) => !exceptId || lower(a.id) !== lower(exceptId),
   );
   if (clashes.length === 0) return;
@@ -205,4 +210,83 @@ export async function refuseDuplicateTitle(client, worldId, title, exceptId = nu
     `This world already has ${clashes.length === 1 ? "an article" : `${clashes.length} articles`} with that title: ${list}. ` +
       "Nothing was sent. Either use a different title, or change the existing article with worldanvil_update_article.",
   );
+}
+
+/**
+ * A title with the differences a writer would not think of as differences
+ * taken out: punctuation, and a leading "The", "A" or "An". Used only to
+ * SUGGEST near matches, never to decide that two titles are the same.
+ */
+function looseKey(title) {
+  return titleKey(title)
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(the|an|a)\s+/, "");
+}
+
+const MAX_TITLES = 200;
+const MAX_SUGGESTIONS = 5;
+
+/** How an article is written into lore so that World Anvil links to it. */
+const mentionOf = (article) => `@[${article.title}](Article:${article.id})`;
+
+/**
+ * Look up articles by title: one read of the world's article list, however
+ * many titles are asked for.
+ *
+ * Each title gets "found" (exactly one article), "more_than_one" or
+ * "not_found". A match is exact apart from capitals and spacing (titleKey).
+ * A title that is not found also gets up to five near matches, as
+ * suggestions for a person or session to choose from.
+ *
+ * `articles`: the world's article list, if the caller has already read it.
+ */
+export async function findArticles(client, worldId, titles, articles = null) {
+  const asked = (Array.isArray(titles) ? titles : [titles]).map((t) => (typeof t === "string" ? t : ""));
+  if (asked.length === 0 || asked.some((t) => titleKey(t) === ""))
+    throw new Error("Give at least one title to look for, and no empty ones.");
+  if (asked.length > MAX_TITLES)
+    throw new Error(`At most ${MAX_TITLES} titles can be looked up in one call (${asked.length} given).`);
+
+  articles = articles ?? (await allArticles(client, worldId));
+  const byKey = new Map();
+  for (const a of articles) {
+    const key = titleKey(a?.title);
+    if (!key) continue;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(a);
+  }
+  const line = (a) => ({ ...articleLine(a), mention: mentionOf(a) });
+
+  const results = asked.map((title) => {
+    const matches = (byKey.get(titleKey(title)) ?? []).map(line);
+    if (matches.length === 1) return { asked: title, status: "found", ...matches[0] };
+    if (matches.length > 1) return { asked: title, status: "more_than_one", matches };
+
+    const loose = looseKey(title);
+    const same = [];
+    const partial = [];
+    if (loose)
+      for (const a of articles) {
+        const other = looseKey(a?.title);
+        if (!other) continue;
+        if (other === loose) same.push(a);
+        else if (loose.length >= 3 && other.length >= 3 && (other.includes(loose) || loose.includes(other)))
+          partial.push(a);
+      }
+    const suggestions = [...same, ...partial].slice(0, MAX_SUGGESTIONS).map(line);
+    return { asked: title, status: "not_found", ...(suggestions.length ? { suggestions } : {}) };
+  });
+
+  const count = (status) => results.filter((r) => r.status === status).length;
+  return {
+    world_id: worldId,
+    articles_in_world: articles.length,
+    totals: { found: count("found"), more_than_one: count("more_than_one"), not_found: count("not_found") },
+    results,
+    note:
+      "A match is exact apart from capitals and spacing. Suggestions are near matches only: " +
+      "check them before using one. `mention` is the text that links to the article from lore.",
+  };
 }

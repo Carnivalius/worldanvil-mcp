@@ -328,6 +328,68 @@ export function dropTitleHeading(markdown, title) {
   return { text: lines.slice(j).join("\n"), dropped };
 }
 
+/** Code, where a link marker is just text: fenced blocks, `spans`, [code]. */
+const CODE_PARTS = /(```[\s\S]*?```|`[^`\n]*`|\[code\][\s\S]*?\[\/code\])/gi;
+const LINK_MARKER = /\[\[([^\[\]\n]+?)\]\]/g;
+
+/** A marker's two parts: the article's name, and its own shown text if any. */
+function markerParts(inside, whole) {
+  const bar = inside.indexOf("|");
+  const name = (bar === -1 ? inside : inside.slice(0, bar)).trim();
+  const shown = bar === -1 ? null : inside.slice(bar + 1).trim();
+  if (!name || shown === "")
+    throw new Error(
+      `${whole} is not a complete link. Write [[Article Title]], or [[Article Title|words to show]].`,
+    );
+  return { name, shown };
+}
+
+function eachLinkMarker(markdown, fn) {
+  return String(markdown ?? "")
+    .split(CODE_PARTS)
+    .map((part, i) =>
+      i % 2 === 1 ? part : part.replace(LINK_MARKER, (whole, inside) => fn(markerParts(inside, whole), whole)),
+    )
+    .join("");
+}
+
+/**
+ * Every [[Name]] or [[Name|shown text]] link marker in Markdown lore, in
+ * order: `name` is the article's title, `shown` the words to display in
+ * its place (null when the title itself is shown). Markers inside code
+ * are not links.
+ */
+export function linkMarkers(markdown) {
+  const markers = [];
+  eachLinkMarker(markdown, (marker, whole) => {
+    markers.push(marker);
+    return whole;
+  });
+  return markers;
+}
+
+/** The article names in the link markers, each once (capitals and spacing aside). */
+export function linkMarkerNames(markdown) {
+  const names = [];
+  const seen = new Set();
+  for (const { name } of linkMarkers(markdown)) {
+    const key = comparable(name);
+    if (!seen.has(key)) {
+      seen.add(key);
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Replace each link marker with what `replacement(name, shown)` returns
+ * (a mention, or plain words).
+ */
+export function replaceLinkMarkers(markdown, replacement) {
+  return eachLinkMarker(markdown, ({ name, shown }) => replacement(name, shown));
+}
+
 export function convertFieldsToBBCode(data) {
   if (!data || typeof data !== "object") return data;
 

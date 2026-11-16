@@ -254,6 +254,23 @@ export function getToolDefinitions() {
       },
     },
     {
+      name: "worldanvil_find_articles",
+      description:
+        "Find articles in a world by title: pass every title you need in one call (one read of the world, however many titles). Each title comes back as `found` (with id, template, privacy state and `mention`, the text that links to the article from lore), `more_than_one` (all the articles sharing that title, for you to choose between) or `not_found` (with up to five near matches as suggestions; never use a suggestion without checking it is the article meant). A match is exact apart from capitals and spacing. Changes nothing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          world_id: { type: "string", description: "The ID of the world" },
+          titles: {
+            type: "array",
+            items: { type: "string" },
+            description: "The article titles to look for (up to 200)",
+          },
+        },
+        required: ["world_id", "titles"],
+      },
+    },
+    {
       name: "worldanvil_get_article",
       description: "Get a specific article by its ID",
       inputSchema: {
@@ -270,7 +287,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_create_article",
       description:
-        "Create a new article in WorldAnvil. Refused, with nothing sent, if the world already has an article with the same title (capitals and extra spaces ignored): use a different title or update the existing article. It is created private and gets the same icon World Anvil gives that template; the answer's `privacy` confirms it is private. This tool never makes anything public (that is done on the World Anvil website). Put the lore in content and working notes in author_notes. Do not open content with a heading that repeats the title: World Anvil shows the title itself, and such an opening heading is left out (the answer says so in `title_heading`). Markdown in content, author_notes and all template-specific fields is converted to the BBCode World Anvil's own editor writes (paragraphs, headings, lists, quotes, tables, links); BBCode already in the text is left as it is. Use the fields parameter to set template-specific fields like localization, manifestation, lawtype (for Natural Law), anatomy, traits (for Species), seeded, authornotes, etc.",
+        "Create a new article in WorldAnvil. Refused, with nothing sent, if the world already has an article with the same title (capitals and extra spaces ignored): use a different title or update the existing article. It is created private and gets the same icon World Anvil gives that template; the answer's `privacy` confirms it is private. This tool never makes anything public (that is done on the World Anvil website). Put the lore in content and working notes in author_notes. To link to another article in the same world write [[Its Title]] in content or author_notes: it becomes a World Anvil mention (capitals and spacing aside; the answer's `links` says what was linked). To display other words for the link write [[Its Title|words to show]]. See unresolved_links for names that have no article. Do not open content with a heading that repeats the title: World Anvil shows the title itself, and such an opening heading is left out (the answer says so in `title_heading`). Markdown in content, author_notes and all template-specific fields is converted to the BBCode World Anvil's own editor writes (paragraphs, headings, lists, quotes, tables, links); BBCode already in the text is left as it is. Use the fields parameter to set template-specific fields like localization, manifestation, lawtype (for Natural Law), anatomy, traits (for Species), seeded, authornotes, etc.",
       inputSchema: {
         type: "object",
         properties: {
@@ -294,6 +311,12 @@ export function getToolDefinitions() {
             enum: ["markdown", "bbcode"],
             description:
               "How content and author_notes are written. \"markdown\" (default): converted to the BBCode World Anvil's own editor writes. \"bbcode\": sent exactly as written, nothing converted.",
+          },
+          unresolved_links: {
+            type: "string",
+            enum: ["refuse", "plain"],
+            description:
+              "What to do when a [[Name]] link in the text has no article, or several articles share the name. \"refuse\" (default): nothing is sent and the answer lists each problem name with near matches. \"plain\": those names are sent as ordinary text and listed in the answer; send the same text again later to link them (for a batch of new articles that mention each other).",
           },
           author_notes: {
             type: "string",
@@ -323,7 +346,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_update_article",
       description:
-        "Update an existing article in WorldAnvil. A new title is refused if another article in the world already has it. An opening heading in content that only repeats the title is left out (the answer says so in `title_heading`). Only what is passed changes: content replaces the main text, author_notes replaces the Author Notes section, and each leaves the other alone. Markdown in content, author_notes and template-specific fields is converted to the BBCode World Anvil's own editor writes; BBCode already in the text is left as it is. Can set a different icon or reset it to the template's own. Cannot change an article's template, except to a variant of the same one (Organization to Country, Military or Religion; Character to God/Deity).",
+        "Update an existing article in WorldAnvil. A new title is refused if another article in the world already has it. To link to another article in the same world write [[Its Title]] in content or author_notes: it becomes a World Anvil mention (capitals and spacing aside; the answer's `links` says what was linked). To display other words for the link write [[Its Title|words to show]]. See unresolved_links for names that have no article. An opening heading in content that only repeats the title is left out (the answer says so in `title_heading`). Only what is passed changes: content replaces the main text, author_notes replaces the Author Notes section, and each leaves the other alone. Markdown in content, author_notes and template-specific fields is converted to the BBCode World Anvil's own editor writes; BBCode already in the text is left as it is. Can set a different icon or reset it to the template's own. Cannot change an article's template, except to a variant of the same one (Organization to Country, Military or Religion; Character to God/Deity).",
       inputSchema: {
         type: "object",
         properties: {
@@ -345,6 +368,12 @@ export function getToolDefinitions() {
             enum: ["markdown", "bbcode"],
             description:
               "How content and author_notes are written. \"markdown\" (default): converted to the BBCode World Anvil's own editor writes. \"bbcode\": sent exactly as written, nothing converted.",
+          },
+          unresolved_links: {
+            type: "string",
+            enum: ["refuse", "plain"],
+            description:
+              "What to do when a [[Name]] link in the text has no article, or several articles share the name. \"refuse\" (default): nothing is sent and the answer lists each problem name with near matches. \"plain\": those names are sent as ordinary text and listed in the answer; send the same text again later to link them (for a batch of new articles that mention each other).",
           },
           author_notes: {
             type: "string",

@@ -4,7 +4,15 @@
  * Implementation of all tool call handlers.
  */
 
-import { markdownToBBCode, convertFieldsToBBCode, dropTitleHeading, opensWithHeading } from "./utils.js";
+import {
+  markdownToBBCode,
+  convertFieldsToBBCode,
+  dropTitleHeading,
+  opensWithHeading,
+  linkMarkerNames,
+  linkMarkers,
+  replaceLinkMarkers,
+} from "./utils.js";
 import {
   CATEGORY_DEFAULT_ICON,
   metadataWithVariant,
@@ -12,7 +20,14 @@ import {
   resolveTemplate,
   templateOfArticle,
 } from "./article-templates.js";
-import { listPage, refuseDuplicateTitle, worldOutline } from "./listing.js";
+import {
+  allArticles,
+  findArticles,
+  listPage,
+  refuseDuplicateTitle,
+  titleKey,
+  worldOutline,
+} from "./listing.js";
 import { backupWorld } from "./access/world-backup.js";
 import { backupItem, compareBackup, listBackups, restoreItem, searchBackups } from "./access/lookback.js";
 
@@ -51,31 +66,124 @@ export function sanitizeFields(fields) {
  * The main text always gets paragraphs; author notes only when they run
  * to more than one line.
  *
- * `title` (the article's title, or a function that fetches it) lets an
- * opening Markdown heading that only repeats the title be dropped; the
- * function is called only when the text does open with a heading.
- * Returns the fields to send and, if a heading was dropped, a note saying so.
+ * Two things are done to Markdown text before it is converted:
+ *  - an opening heading in the main text that only repeats the article's
+ *    title is left out;
+ *  - [[Name]] link markers (main text and author notes) become mentions of
+ *    the article with that title in the same world; [[Name|shown text]]
+ *    links the same article but displays the shown text.
+ *
+ * `about` says what the text belongs to; each entry may be a value or a
+ * function fetching it, called only if it is needed:
+ *   title     the article's title
+ *   worldId   the world to look names up in
+ *   articles  the world's article list, if already read
+ *   selfId    the article's own id (an article never links to itself)
+ *
+ * Returns the fields to send, a note if a heading was left out, and what
+ * became of each link marker.
  */
-async function articleText(args, anchorSeed, title) {
+async function articleText(args, anchorSeed, client, about = {}) {
   const format = args.format === undefined ? "markdown" : String(args.format).toLowerCase();
   if (format !== "markdown" && format !== "bbcode")
     throw new Error(`format must be "markdown" or "bbcode", not "${args.format}"`);
+  const unresolved = args.unresolved_links === undefined ? "refuse" : String(args.unresolved_links).toLowerCase();
+  if (unresolved !== "refuse" && unresolved !== "plain")
+    throw new Error(`unresolved_links must be "refuse" or "plain", not "${args.unresolved_links}"`);
   const asWritten = format === "bbcode";
-  const out = {};
+  const get = async (value) => (typeof value === "function" ? await value() : value);
+
+  let content = args.content;
+  let notes = args.author_notes;
   let note = null;
-  if (args.content !== undefined) {
-    let content = args.content;
-    if (!asWritten && typeof content === "string" && opensWithHeading(content)) {
-      const cut = dropTitleHeading(content, typeof title === "function" ? await title() : title);
+  let links = null;
+
+  if (!asWritten) {
+    if (typeof content === "string" && opensWithHeading(content)) {
+      const cut = dropTitleHeading(content, await get(about.title));
       content = cut.text;
       if (cut.dropped)
         note = `The opening heading "${cut.dropped}" was left out because it repeats the article's title, which World Anvil already shows above the text.`;
     }
-    out.content = asWritten ? content : markdownToBBCode(content, { paragraphs: true, anchorSeed });
+
+    const names = [];
+    for (const text of [content, notes])
+      if (typeof text === "string")
+        for (const name of linkMarkerNames(text))
+          if (!names.some((n) => titleKey(n) === titleKey(name))) names.push(name);
+
+    if (names.length > 0) {
+      const worldId = await get(about.worldId);
+      if (!worldId)
+        throw new Error("Could not tell which world this article is in, so its [[links]] could not be looked up. Nothing was sent.");
+      const found = await findArticles(client, worldId, names, await get(about.articles));
+      const selfId = String((await get(about.selfId)) ?? "").toLowerCase();
+      const selfTitle = titleKey(await get(about.title));
+
+      // The words each name is shown as, where the writer gave their own.
+      const shownAs = new Map();
+      for (const text of [content, notes])
+        if (typeof text === "string")
+          for (const { name, shown } of linkMarkers(text))
+            if (shown) {
+              const key = titleKey(name);
+              if (!shownAs.has(key)) shownAs.set(key, []);
+              if (!shownAs.get(key).includes(shown)) shownAs.get(key).push(shown);
+            }
+      const withShown = (key, entry) => (shownAs.has(key) ? { ...entry, shown_as: shownAs.get(key) } : entry);
+
+      // name -> { id } for a mention, or null for plain words.
+      const replacement = new Map();
+      links = { linked: [], plain: [] };
+      const problems = [];
+      for (const r of found.results) {
+        const key = titleKey(r.asked);
+        const isSelf =
+          (selfTitle && key === selfTitle) ||
+          (r.status === "found" && selfId && String(r.id).toLowerCase() === selfId);
+        if (isSelf) {
+          replacement.set(key, null);
+          links.plain.push(withShown(key, { name: r.asked, why: "the article itself" }));
+        } else if (r.status === "found") {
+          replacement.set(key, { id: r.id, title: r.title });
+          links.linked.push(withShown(key, { name: r.asked, title: r.title, id: r.id }));
+        } else {
+          const why =
+            r.status === "more_than_one"
+              ? `${r.matches.length} articles share this title (ids ${r.matches.map((m) => m.id).join(", ")})`
+              : "no article with this title" +
+                (r.suggestions ? ` (near: ${r.suggestions.map((s) => `"${s.title}"`).join(", ")})` : "");
+          replacement.set(key, null);
+          links.plain.push(withShown(key, { name: r.asked, why }));
+          problems.push(`[[${r.asked}]]: ${why}`);
+        }
+      }
+      if (problems.length > 0 && unresolved === "refuse")
+        throw new Error(
+          `${problems.length === 1 ? "A link" : `${problems.length} links`} could not be made. ${problems.join("; ")}. ` +
+            "Nothing was sent. Correct the names, or create the missing articles first, or pass " +
+            'unresolved_links: "plain" to send these names as ordinary text (and send the text again later to link them).',
+        );
+      // A mention shows the article's real title unless the writer gave
+      // their own words; an unlinked name shows as it was written.
+      const swap = (text) =>
+        typeof text === "string"
+          ? replaceLinkMarkers(text, (name, shown) => {
+              const target = replacement.get(titleKey(name));
+              return target ? `@[${shown ?? target.title}](Article:${target.id})` : (shown ?? name);
+            })
+          : text;
+      content = swap(content);
+      notes = swap(notes);
+    }
   }
-  if (args.author_notes !== undefined)
-    out.authornotes = asWritten ? args.author_notes : markdownToBBCode(args.author_notes, { anchorSeed: `${anchorSeed} notes` });
-  return { fields: out, note };
+
+  const fields = {};
+  if (content !== undefined)
+    fields.content = asWritten ? content : markdownToBBCode(content, { paragraphs: true, anchorSeed });
+  if (notes !== undefined)
+    fields.authornotes = asWritten ? notes : markdownToBBCode(notes, { anchorSeed: `${anchorSeed} notes` });
+  return { fields, note, links };
 }
 
 /**
@@ -268,6 +376,11 @@ export async function handleToolCall(name, args, client) {
         );
       }
 
+      case "worldanvil_find_articles":
+        return jsonResponse(
+          await findArticles(client, args.world_id, args.titles !== undefined ? args.titles : args.title),
+        );
+
       case "worldanvil_get_world_outline":
         return jsonResponse(await worldOutline(client, args.world_id));
 
@@ -287,14 +400,21 @@ export async function handleToolCall(name, args, client) {
         if (template.variant)
           data.articleMetadata = metadataWithVariant(null, template.variant);
         Object.assign(data, sanitizeFields(args.fields));
+        // One read of the world's articles serves both the title check and
+        // any [[links]] in the text.
+        const articles = await allArticles(client, args.world_id);
+        // One title, one article.
+        await refuseDuplicateTitle(client, args.world_id, args.title, null, articles);
         // After the fields, so nothing in them can override these.
-        const text = await articleText(args, String(args.title ?? ""), args.title);
+        const text = await articleText(args, String(args.title ?? ""), client, {
+          title: args.title,
+          worldId: args.world_id,
+          articles,
+        });
         Object.assign(data, text.fields);
         data.icon = icon;
         data.state = "private";
         if (args.category_id) data.category = { id: args.category_id };
-        // One title, one article: checked last, just before sending.
-        await refuseDuplicateTitle(client, args.world_id, args.title);
         const created = await client.createArticle(data);
         return jsonResponse({
           ...created,
@@ -302,6 +422,7 @@ export async function handleToolCall(name, args, client) {
           icon,
           privacy: await confirmArticlePrivate(client, created),
           ...(text.note ? { title_heading: text.note } : {}),
+          ...(text.links ? { links: text.links } : {}),
         });
       }
 
@@ -309,23 +430,37 @@ export async function handleToolCall(name, args, client) {
         const data = {};
         if (args.title !== undefined) data.title = args.title;
         Object.assign(data, sanitizeFields(args.fields));
-        // The title to compare an opening heading with: the new one if the
-        // article is being renamed, otherwise the one it has now (read
-        // only if the text does open with a heading).
-        const text = await articleText(args, String(args.article_id ?? ""),
-          args.title !== undefined
-            ? args.title
-            : async () => (await client.getArticle(args.article_id))?.title);
+        // The article as it is now, read at most once and only if needed:
+        // for its title (an opening heading that repeats it) and its world
+        // ([[links]], and the title check on a rename).
+        let reading = null;
+        const current = () => (reading ??= client.getArticle(args.article_id));
+        const worldId = async () => (await current())?.world?.id;
+        let listing = null;
+        const articles = async () => {
+          const world = await worldId();
+          return world ? (listing ??= allArticles(client, world)) : null;
+        };
+
+        const text = await articleText(args, String(args.article_id ?? ""), client, {
+          title: args.title !== undefined ? args.title : async () => (await current())?.title,
+          worldId,
+          articles,
+          selfId: args.article_id,
+        });
         Object.assign(data, text.fields);
         Object.assign(data, await articleIdentityChanges(client, args));
         if (args.category_id) data.category = { id: args.category_id };
         if (args.title !== undefined) {
           // A rename must not take a title another article already has.
-          const current = await client.getArticle(args.article_id);
-          await refuseDuplicateTitle(client, current?.world?.id, args.title, args.article_id);
+          await refuseDuplicateTitle(client, await worldId(), args.title, args.article_id, await articles());
         }
         const updated = await client.updateArticle(args.article_id, data);
-        return jsonResponse(text.note ? { ...updated, title_heading: text.note } : updated);
+        return jsonResponse({
+          ...updated,
+          ...(text.note ? { title_heading: text.note } : {}),
+          ...(text.links ? { links: text.links } : {}),
+        });
       }
 
       case "worldanvil_delete_article":

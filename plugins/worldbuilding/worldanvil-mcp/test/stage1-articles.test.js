@@ -587,6 +587,98 @@ describe("an opening heading that repeats the title", () => {
   });
 });
 
+describe("find articles by title", () => {
+  const ARTICLES = [
+    { id: "a-1", title: "The Iron Mountains", entityClass: "Location", state: "private" },
+    { id: "a-2", title: "Queen Elara", entityClass: "Person", state: "private" },
+    { id: "a-3", title: "Thronehold", entityClass: "Settlement", state: "public" },
+    { id: "a-4", title: "thronehold", entityClass: "Article", state: "private" },
+    { id: "a-5", title: "House Blackwood", entityClass: "Organization", state: "private" },
+    { id: "a-6", title: "Blackwood", entityClass: "Person", state: "private" },
+  ];
+  const world = (articles = ARTICLES) => ({
+    listArticles: vi.fn(async (worldId, { offset = 0, limit = 50 } = {}) => ({
+      entities: articles.slice(offset, offset + limit),
+    })),
+  });
+  const find = (titles, client = world()) =>
+    call("worldanvil_find_articles", { world_id: "w1", titles }, client);
+
+  it("finds an article whatever the capitals and spacing, with its link text", async () => {
+    const answer = await find(["queen  ELARA "]);
+    expect(answer.results).toEqual([
+      {
+        asked: "queen  ELARA ",
+        status: "found",
+        id: "a-2",
+        title: "Queen Elara",
+        template: "Character",
+        icon: null,
+        state: "private",
+        draft: null,
+        mention: "@[Queen Elara](Article:a-2)",
+      },
+    ]);
+    expect(answer.totals).toEqual({ found: 1, more_than_one: 0, not_found: 0 });
+    expect(answer.articles_in_world).toBe(6);
+  });
+
+  it("uses the type word Article in the link text whatever the template", async () => {
+    const answer = await find(["House Blackwood"]);
+    expect(answer.results[0].mention).toBe("@[House Blackwood](Article:a-5)");
+  });
+
+  it("lists every article when a title is shared", async () => {
+    const answer = await find(["Thronehold"]);
+    expect(answer.results[0].status).toBe("more_than_one");
+    expect(answer.results[0].matches.map((m) => m.id)).toEqual(["a-3", "a-4"]);
+    expect(answer.results[0].id).toBeUndefined();
+  });
+
+  it("says not found, and suggests a title differing only by The or punctuation", async () => {
+    const answer = await find(["Iron Mountains", "the iron-mountains!"]);
+    for (const r of answer.results) {
+      expect(r.status).toBe("not_found");
+      expect(r.suggestions.map((s) => s.id)).toEqual(["a-1"]);
+      expect(r.id).toBeUndefined();
+    }
+  });
+
+  it("suggests titles that contain, or are contained in, the one asked for", async () => {
+    const answer = await find(["Elara", "Blackwood Hall"]);
+    expect(answer.results[0].suggestions.map((s) => s.title)).toEqual(["Queen Elara"]);
+    expect(answer.results[1].suggestions.map((s) => s.title)).toEqual(["Blackwood"]);
+  });
+
+  it("gives no suggestions when nothing is near, and never more than five", async () => {
+    expect((await find(["Zzyzx"])).results[0]).toEqual({ asked: "Zzyzx", status: "not_found" });
+    const many = Array.from({ length: 9 }, (_, i) => ({ id: `r-${i}`, title: `River Ford ${i}` }));
+    const answer = await find(["River Ford"], world(many));
+    expect(answer.results[0].suggestions).toHaveLength(5);
+  });
+
+  it("answers many titles from one read of the world, in the order asked", async () => {
+    const many = Array.from({ length: 130 }, (_, i) => ({ id: `p-${i}`, title: `Place ${i}` }));
+    const client = world(many);
+    const answer = await find(["Place 129", "Nowhere", "place 0"], client);
+    expect(answer.results.map((r) => r.status)).toEqual(["found", "not_found", "found"]);
+    expect(answer.results[0].id).toBe("p-129");
+    const firstReads = client.listArticles.mock.calls.filter(([, o]) => (o?.offset ?? 0) === 0);
+    expect(firstReads).toHaveLength(1);
+  });
+
+  it("refuses no titles, an empty title, or too many", async () => {
+    await expect(find([])).rejects.toThrow(/at least one title/);
+    await expect(find(["Thronehold", "  "])).rejects.toThrow(/no empty ones/);
+    await expect(find(Array.from({ length: 201 }, (_, i) => `T${i}`))).rejects.toThrow(/At most 200/);
+  });
+
+  it("is offered as a tool that needs a world and titles", () => {
+    const tool = getToolDefinitions().find((t) => t.name === "worldanvil_find_articles");
+    expect(tool.inputSchema.required).toEqual(["world_id", "titles"]);
+  });
+});
+
 describe("category icons", () => {
   it("a new category gets the site's folder icon", async () => {
     const client = articleClient();
