@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:live": "vitest run --config vitest.live.config.js"
+    "test:live": "vitest run --config vitest.live.config.js",
+    "archive:merge": "node scripts/merge-archive.js"
   },
   "keywords": [
     "mcp",
@@ -40,6 +41,7 @@
   "files": [
     "index.js",
     "src/",
+    "scripts/",
     "CLAUDE.md",
     "README.md"
   ],

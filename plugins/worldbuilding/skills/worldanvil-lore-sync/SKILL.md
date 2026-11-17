@@ -152,11 +152,20 @@ articles touched.
 
 Project files must not go stale or pile up.
 - Merge scattered notes on one topic into one file.
-- A note that has been acted on ("update this lore with X") should be
-  archived and leave the project.
-- If the server has an archive tool, use it. If not, or if this session
-  cannot change project files, finish with a list: files to merge, files
-  now safe to archive or remove, and why. The user does the rest.
+- A note that has been acted on ("update this lore with X") is archived
+  and then leaves the project. For each one call
+  `worldanvil_archive_file` with the note's name, its full text exactly
+  as it is, one line saying what was done with it, and the titles of
+  the articles it went into. Only when the answer says `archived: true`
+  (or that it was already archived) may the note be removed.
+- If this session can change project files, remove the archived notes
+  and say which. If it cannot, finish with a list: files to merge, and
+  files now archived and safe for the user to remove.
+- Never archive a note that still holds anything not yet in World
+  Anvil: ask the user first.
+- "Where did that note go?" is answered by `worldanvil_list_archive`.
+- If the archive tools are missing from this session, do not remove
+  anything: finish with the list instead.
 
 ## Style note
 

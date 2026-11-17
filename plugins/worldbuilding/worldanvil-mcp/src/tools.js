@@ -137,6 +137,45 @@ export function getToolDefinitions() {
       },
     },
     {
+      name: "worldanvil_archive_file",
+      description:
+        "Archive a note that has been acted on (for example a lore note whose content is now in World Anvil), so it can leave the writing project without being lost. Saves a copy of the note's full text in the local archive beside the world's backups and adds one line to a running log: the date, the note's name, what was done with it and which articles it went into. The copy is read back to check it matches. Only after this succeeds should the note be removed from the project. A note already archived under the same name with the same text is not saved twice. Local files only: nothing is sent to World Anvil and nothing there is changed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          world_id: { type: "string", description: "The ID of the world the note belongs to" },
+          file_name: { type: "string", description: "The note's file name in the project" },
+          content: { type: "string", description: "The full text of the note, exactly as it is" },
+          what_was_done: {
+            type: "string",
+            description: "One line saying what became of the note, e.g. \"merged into the article and its author notes\"",
+          },
+          articles: {
+            type: "array",
+            items: { type: "string" },
+            description: "Titles of the articles the note went into (optional)",
+          },
+          source: { type: "string", description: "Where the note was kept, e.g. the project's name (optional)" },
+        },
+        required: ["world_id", "file_name", "content", "what_was_done"],
+      },
+    },
+    {
+      name: "worldanvil_list_archive",
+      description:
+        "Answer \"where did that note go?\": the log of notes archived for a world, newest first, each with its date, name, what was done and the articles it went into. Give text to see only entries that mention it. Give an entry's id to read that note's full text. Reads local files only; changes nothing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          world_id: { type: "string", description: "The ID of the world" },
+          text: { type: "string", description: "Optional: only entries whose name, description, source or articles mention this" },
+          id: { type: "string", description: "Optional: an entry's id, to read that note's text" },
+          limit: { type: "number", description: "Most entries to return (default 50)" },
+        },
+        required: ["world_id"],
+      },
+    },
+    {
       name: "worldanvil_search_backups",
       description:
         "Search a world's local backups for a piece of text (not case-sensitive), for example to find wording that has gone from an article. Returns the items whose saved copies contain it, with the version, when it was saved and a snippet. Newest copies are searched first. Follows the access settings. Reads local files only; changes nothing.",

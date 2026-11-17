@@ -96,15 +96,15 @@ describe("filterTools", () => {
     const groups = new Set(["core"]);
     const result = filterTools(ALL_TOOLS, groups);
     // Core has identity + world CRUD = 6 tools
-    expect(result.length).toBe(12); // includes backup_world and the five backup look-back tools
-    expect(result.every((t) => t.name.match(/identity|world|backup|restore_item/))).toBe(true);
+    expect(result.length).toBe(14); // includes backup_world, the five backup look-back tools and the two archive tools
+    expect(result.every((t) => t.name.match(/identity|world|backup|restore_item|archive/))).toBe(true);
   });
 
   it("should filter to content group", () => {
     const groups = new Set(["core", "content"]);
     const result = filterTools(ALL_TOOLS, groups);
-    // Core (12) + articles (5) + find, compare and reformat article (3) + copy articles (1) + world outline (1) + categories (5) = 27
-    expect(result.length).toBe(27);
+    // Core (12) + articles (5) + find, compare and reformat article (3) + copy articles (1) + world outline (1) + categories (5) = 29, with core now 14
+    expect(result.length).toBe(29);
   });
 
   it("should filter with a preset", () => {
@@ -153,7 +153,7 @@ describe("GROUP_RESOURCES completeness", () => {
     const unmapped = [];
     for (const tool of ALL_TOOLS) {
       const resource = tool.name.replace(
-        /^worldanvil_(get|list|find|create|update|delete|backup|search|compare|restore|reformat|copy)_/,
+        /^worldanvil_(get|list|find|create|update|delete|backup|search|compare|restore|reformat|copy|archive)_/,
         "",
       );
       if (!resourceToGroup.has(resource)) {

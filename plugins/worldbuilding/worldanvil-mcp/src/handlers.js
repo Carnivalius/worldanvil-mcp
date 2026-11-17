@@ -34,6 +34,7 @@ import { compareAsRead, toEditorForm } from "./reader-view.js";
 import { backupWorld } from "./access/world-backup.js";
 import { actionsAnyWorldAllows } from "./access/guard.js";
 import { copyArticles } from "./copy-world.js";
+import { archiveFile, listArchive } from "./access/archive.js";
 import { backupItem, compareBackup, listBackups, restoreItem, searchBackups } from "./access/lookback.js";
 
 /**
@@ -538,6 +539,12 @@ export async function handleToolCall(name, args, client) {
 
       case "worldanvil_copy_articles":
         return jsonResponse(await copyArticles(client, args));
+
+      case "worldanvil_archive_file":
+        return jsonResponse(await archiveFile(client, args));
+
+      case "worldanvil_list_archive":
+        return jsonResponse(await listArchive(client, args));
 
       case "worldanvil_backup_item":
         return jsonResponse(await backupItem(client, args));
