@@ -62,6 +62,12 @@ describe.runIf(enabled && stage === "read")("archive a note and find it again", 
       id = saved.already_archived.id;
     }
     expect(id).toBeTruthy();
+    expect(saved.copy).toMatchObject({
+      characters: TEXT.length,
+      lines: 7,
+      first_line: "# MCP-TEST-Archive Try",
+      last_line: "- two",
+    });
   });
 
   it("lists it for this world, found by a word in its name", async () => {

@@ -71,6 +71,24 @@ const asList = (value) =>
     .filter(Boolean);
 
 /**
+ * What a session needs to check the saved copy against the note in the
+ * project: the tool can only save the text it was sent, so a note that was
+ * shortened or reworded on the way here would be archived that way.
+ */
+export function copyCheck(content) {
+  const lines = content.split(/\r?\n/);
+  const written = lines.map((l) => l.trim()).filter(Boolean);
+  const show = (l) => (l.length > 120 ? `${l.slice(0, 120)}…` : l);
+  return {
+    characters: content.length,
+    lines: lines.length,
+    first_line: show(written[0] ?? ""),
+    last_line: show(written[written.length - 1] ?? ""),
+    check: "Compare these with the note in the project. If they differ, the text sent was not the whole note: do not remove it; archive it again with its full text.",
+  };
+}
+
+/**
  * Save a copy of a note and add its line to the log.
  *
  * @param {object} client - guarded WorldAnvilClient
@@ -121,7 +139,8 @@ export async function archiveFile(
     return {
       archived: false,
       already_archived: { id: already.id, date: already.date, file: already.file, what_was_done: already.what_was_done },
-      note: "This exact note, under this name, is already in the archive. Nothing was saved again. It is safe to remove from the project.",
+      copy: copyCheck(content),
+      note: "This exact note, under this name, is already in the archive. Nothing was saved again. It is safe to remove from the project once `copy` matches the note there.",
     };
 
   const id = newId();
@@ -159,6 +178,7 @@ export async function archiveFile(
     id,
     file,
     folder: join(dir, "files"),
+    copy: copyCheck(content),
     log_entries: readLog(dir).length,
     ...(logged.length
       ? {
@@ -167,7 +187,7 @@ export async function archiveFile(
         }
       : {}),
     note:
-      "A copy is saved and logged, and was read back to check it matches. The note can now be removed from the project " +
+      "A copy is saved and logged, and was read back to check it matches what was sent. Once `copy` matches the note in the project, the note can now be removed from the project " +
       "(remove it yourself if this session can change project files; otherwise list it for the user to remove).",
   };
 }

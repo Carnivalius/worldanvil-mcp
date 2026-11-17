@@ -74,6 +74,21 @@ describe("archive a note", () => {
     });
     expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(answer.note).toMatch(/can now be removed from the project/);
+    expect(answer.copy).toMatchObject({ characters: 31, lines: 4, first_line: "# Harbour", last_line: "Add the salt trade." });
+    expect(answer.copy.check).toMatch(/do not remove it/);
+  });
+
+  it("describes the copy so it can be checked against the note, on a repeat too", async () => {
+    const dir = tempDir();
+    const long = `${"a".repeat(200)}\r\n\r\n  last words  \r\n`;
+    const first = await archiveFile(client(dir), note({ content: long }), fixed());
+    expect(first.copy.characters).toBe(long.length);
+    expect(first.copy.lines).toBe(4);
+    expect(first.copy.first_line).toBe(`${"a".repeat(120)}…`);
+    expect(first.copy.last_line).toBe("last words");
+    const again = await archiveFile(client(dir), note({ content: long }), fixed());
+    expect(again.archived).toBe(false);
+    expect(again.copy).toEqual(first.copy);
   });
 
   it("does not save the same note twice, and says it is already there", async () => {

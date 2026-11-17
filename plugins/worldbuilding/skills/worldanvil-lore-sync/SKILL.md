@@ -157,7 +157,10 @@ Project files must not go stale or pile up.
   `worldanvil_archive_file` with the note's name, its full text exactly
   as it is, one line saying what was done with it, and the titles of
   the articles it went into. Only when the answer says `archived: true`
-  (or that it was already archived) may the note be removed.
+  (or that it was already archived), and the answer's `copy` (character
+  count, line count, first and last lines) matches the note in the
+  project, may the note be removed. If they differ, the text sent was
+  not the whole note: archive it again with its full text.
 - If this session can change project files, remove the archived notes
   and say which. If it cannot, finish with a list: files to merge, and
   files now archived and safe for the user to remove.

@@ -139,7 +139,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_archive_file",
       description:
-        "Archive a note that has been acted on (for example a lore note whose content is now in World Anvil), so it can leave the writing project without being lost. Saves a copy of the note's full text in the local archive beside the world's backups and adds one line to a running log: the date, the note's name, what was done with it and which articles it went into. The copy is read back to check it matches. Only after this succeeds should the note be removed from the project. A note already archived under the same name with the same text is not saved twice. Local files only: nothing is sent to World Anvil and nothing there is changed.",
+        "Archive a note that has been acted on (for example a lore note whose content is now in World Anvil), so it can leave the writing project without being lost. Saves a copy of the note's full text in the local archive beside the world's backups and adds one line to a running log: the date, the note's name, what was done with it and which articles it went into. The copy is read back to check it matches what was sent. The answer's copy gives its character count, line count and first and last lines: compare those with the note in the project, since only the text sent here is saved. Only after this succeeds and those match should the note be removed from the project. A note already archived under the same name with the same text is not saved twice. Local files only: nothing is sent to World Anvil and nothing there is changed.",
       inputSchema: {
         type: "object",
         properties: {
