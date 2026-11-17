@@ -231,7 +231,7 @@ describe("compare article tool", () => {
   it("does not refuse over a name with no article: it only looks, and says so", async () => {
     const answer = await compare(
       { content: "Near [[Nowhere]]." },
-      articleClient(base({ content: "[p]Near [[Nowhere]].[/p]" })),
+      articleClient(base({ content: "[p]Near {{Nowhere}}.[/p]" })),
     );
     expect(answer.status).toBe("same");
     expect(answer.unlinked_names).toMatch(/No article yet for: Nowhere.*placeholder/);

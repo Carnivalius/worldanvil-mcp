@@ -125,7 +125,7 @@ describe("create article with [[links]]", () => {
       client,
     );
     expect(sent(client).content).toBe(
-      "[p]@[Queen Elara](Article:a-1) visited [[Nowhere]], [[Nowhere|a lost place]] and the [[Silver Order]].[/p]",
+      "[p]@[Queen Elara](Article:a-1) visited {{Nowhere}}, {{Nowhere|a lost place}} and the {{Silver Order}}.[/p]",
     );
     expect(answer.links.linked.map((l) => l.id)).toEqual(["a-1"]);
     expect(answer.links.plain).toEqual([]);
@@ -135,9 +135,19 @@ describe("create article with [[links]]", () => {
     ]);
     // The session is told in words, so it can tell the user.
     expect(answer.links.tell_the_user).toMatch(
-      /^2 links were not made and are kept in the text as placeholders: \[\[Nowhere\]\], \[\[Silver Order\]\]\. Tell the user/,
+      /^2 links were not made and are kept in the text as placeholders: \{\{Nowhere\}\}, \{\{Silver Order\}\}\. Tell the user/,
     );
     expect(answer.links.tell_the_user).toMatch(/If one is not wanted.*unresolved_links: "plain"/);
+  });
+
+  it("takes a link written in curly brackets just like one in square brackets", async () => {
+    const client = worldClient();
+    const answer = await create({ content: "{{Queen Elara}} and {{queen elara|the queen}} visited {{Nowhere|a lost place}}." }, client);
+    expect(sent(client).content).toBe(
+      "[p]@[Queen Elara](Article:a-1) and @[the queen](Article:a-1) visited {{Nowhere|a lost place}}.[/p]",
+    );
+    expect(answer.links.waiting.map((w) => w.name)).toEqual(["Nowhere"]);
+    expect(linkMarkerNames("[[One]] then {{Two}} then {{ one }}, not {single} or [single].")).toEqual(["One", "Two"]);
   });
 
   it("says nothing of the kind when every link was made", async () => {
@@ -149,9 +159,9 @@ describe("create article with [[links]]", () => {
   it("keeps placeholders in author notes too, and through headings and lists", async () => {
     const client = worldClient();
     await create({ content: "## About [[Nowhere]]\n\n- See [[Nowhere]]", author_notes: "TODO: write [[Nowhere]]." }, client);
-    expect(sent(client).content).toMatch(/\]About \[\[Nowhere\]\]\[\/h2\]/);
-    expect(sent(client).content).toMatch(/- See \[\[Nowhere\]\]/);
-    expect(sent(client).authornotes).toBe("TODO: write [[Nowhere]].");
+    expect(sent(client).content).toMatch(/\]About \{\{Nowhere\}\}\[\/h2\]/);
+    expect(sent(client).content).toMatch(/- See \{\{Nowhere\}\}/);
+    expect(sent(client).authornotes).toBe("TODO: write {{Nowhere}}.");
   });
 
   it("with unresolved_links refuse: sends nothing when a name has no article, and suggests near ones", async () => {
@@ -276,9 +286,9 @@ describe("update article with [[links]]", () => {
   it("by default an update keeps an unlinkable name as a placeholder", async () => {
     const client = worldClient();
     const answer = await update({ author_notes: "Ask about [[Nowhere]]." }, client);
-    expect(client.updateArticle.mock.calls[0][1]).toEqual({ authornotes: "Ask about [[Nowhere]]." });
+    expect(client.updateArticle.mock.calls[0][1]).toEqual({ authornotes: "Ask about {{Nowhere}}." });
     expect(answer.links.waiting.map((w) => w.name)).toEqual(["Nowhere"]);
-    expect(answer.links.tell_the_user).toMatch(/^1 link was not made and is kept in the text as a placeholder: \[\[Nowhere\]\]/);
+    expect(answer.links.tell_the_user).toMatch(/^1 link was not made and is kept in the text as a placeholder: \{\{Nowhere\}\}/);
   });
 
   it("with unresolved_links refuse: refuses an unlinkable name and changes nothing", async () => {

@@ -12,6 +12,7 @@ import {
   linkMarkerNames,
   linkMarkers,
   replaceLinkMarkers,
+  placeholderText,
 } from "./utils.js";
 import {
   CATEGORY_DEFAULT_ICON,
@@ -19,6 +20,7 @@ import {
   resolveIcon,
   resolveTemplate,
   templateOfArticle,
+  mainTextField,
 } from "./article-templates.js";
 import {
   allArticles,
@@ -62,9 +64,12 @@ export function sanitizeFields(fields) {
   return convertFieldsToBBCode(fields);
 }
 
-/** A link marker written out again, as the writer wrote it. */
+/**
+ * A marker that stays in the text, in the form that is safe to store:
+ * {{Name}} (see placeholderText), however the writer wrote it.
+ */
 function markerText(name, shown) {
-  return shown ? `[[${name}|${shown}]]` : `[[${name}]]`;
+  return placeholderText(name, shown);
 }
 
 /**
@@ -74,7 +79,7 @@ function markerText(name, shown) {
  * Works on Markdown about to be converted and on text already stored on
  * World Anvil alike (a marker reads the same in both). A name with no
  * article, or shared by several, is handled as `unresolved` says:
- *   "keep"    the marker stays in the text as written: a placeholder
+ *   "keep"    the marker stays in the text as a {{Name}} placeholder
  *             that is made into a link once the article exists
  *   "plain"   the words are written without a link, and the marker is gone
  *   "refuse"  nothing is sent: an Error names what could not be linked
@@ -158,13 +163,14 @@ async function resolveMarkers(texts, client, about = {}) {
     links.waiting = waiting;
     // Said in so many words, so the session tells the user: a kept
     // placeholder shows in the article, and may not be wanted there.
-    const names = waiting.map((w) => `[[${w.name}]]`).join(", ");
+    const names = waiting.map((w) => `{{${w.name}}}`).join(", ");
     links.tell_the_user =
       `${waiting.length === 1 ? "1 link was" : `${waiting.length} links were`} not made and ` +
       `${waiting.length === 1 ? "is" : "are"} kept in the text as ${waiting.length === 1 ? "a placeholder" : "placeholders"}: ${names}. ` +
       "Tell the user which, and why (see `waiting`). Each becomes a link once its article exists (on the next update of this text, " +
-      "or with worldanvil_reformat_article). If one is not wanted, correct the name, or remove it: send the text again " +
-      'without the brackets, or with unresolved_links: "plain" to store the plain words.';
+      "or with worldanvil_reformat_article). On the website it shows as written, in curly brackets. If one is not wanted, " +
+      "correct the name, or remove it: send the text again without the link brackets, or with " +
+      'unresolved_links: "plain" to store the plain words.';
   }
   // A mention shows the article's real title unless the writer gave
   // their own words; an unlinked name shows as it was written.
@@ -311,7 +317,21 @@ function nothingToChange(data, current) {
   });
 }
 
-const CHECK_LABELS = { title: "title", content: "main text", authornotes: "author notes" };
+const CHECK_LABELS = { title: "title", content: "main text", prose: "main text", authornotes: "author notes" };
+
+/**
+ * Put the main text where this kind of article keeps it. The tools take
+ * main text as `content`; a Prose article keeps its own in `prose`.
+ * Returns the name of the field the main text is in.
+ */
+function placeMainText(data, article) {
+  const field = mainTextField(article);
+  if (field !== "content" && data.content !== undefined) {
+    data[field] = data.content;
+    delete data.content;
+  }
+  return field;
+}
 
 /** A short stretch of text around a position, made safe to show on one line. */
 function excerpt(text, at) {
@@ -590,6 +610,7 @@ export async function handleToolCall(name, args, client) {
           articles,
         });
         Object.assign(data, text.fields);
+        const mainField = placeMainText(data, template.templateType);
         data.icon = icon;
         data.state = "private";
         if (args.category_id) data.category = { id: args.category_id };
@@ -597,7 +618,7 @@ export async function handleToolCall(name, args, client) {
         const privacy = await confirmArticlePrivate(client, created);
         const stored = await storedCheck(client, created?.id, data, [
           "title",
-          "content",
+          mainField,
           "authornotes",
           ...Object.keys(templateFields ?? {}),
         ]);
@@ -657,6 +678,8 @@ export async function handleToolCall(name, args, client) {
             throw new Error(`Couldn't read the article before changing it (${e.message}). Nothing was sent.`);
           }
         }
+        // Main text goes where this article's template keeps it.
+        const mainField = placeMainText(data, now);
 
         // Changed on World Anvil since it was compared? Then someone has
         // edited it there, and saving would wipe that edit out.
@@ -691,7 +714,7 @@ export async function handleToolCall(name, args, client) {
         const updated = await client.updateArticle(args.article_id, data);
         const stored = await storedCheck(client, args.article_id, data, [
           "title",
-          "content",
+          mainField,
           "authornotes",
           ...Object.keys(templateFields ?? {}),
         ]);
@@ -719,7 +742,7 @@ export async function handleToolCall(name, args, client) {
         );
         const parts = {};
         if (text.fields.content !== undefined)
-          parts.main_text = compareAsRead(now?.content ?? "", text.fields.content);
+          parts.main_text = compareAsRead(now?.[mainTextField(now)] ?? "", text.fields.content);
         if (text.fields.authornotes !== undefined)
           parts.author_notes = compareAsRead(now?.authornotes ?? "", text.fields.authornotes);
         const statuses = Object.values(parts).map((p) => p.status);
@@ -731,7 +754,7 @@ export async function handleToolCall(name, args, client) {
         const unlinked = text.links?.waiting ?? [];
         // Placeholders in what World Anvil holds now, for the parts being compared.
         const storedNames = [];
-        if (text.fields.content !== undefined) storedNames.push(...linkMarkerNames(now?.content));
+        if (text.fields.content !== undefined) storedNames.push(...linkMarkerNames(now?.[mainTextField(now)]));
         if (text.fields.authornotes !== undefined) storedNames.push(...linkMarkerNames(now?.authornotes));
         return jsonResponse({
           article_id: args.article_id,
@@ -743,7 +766,7 @@ export async function handleToolCall(name, args, client) {
           ...(text.note ? { title_heading: text.note } : {}),
           ...(text.links ? { links: text.links } : {}),
           ...(unlinked.length
-            ? { unlinked_names: `No article yet for: ${unlinked.map((p) => p.name).join(", ")}. An update keeps each as a [[placeholder]] in the text, to be linked once its article exists.` }
+            ? { unlinked_names: `No article yet for: ${unlinked.map((p) => p.name).join(", ")}. An update keeps each in the text as a {{Name}} placeholder, to be linked once its article exists.` }
             : {}),
           ...(storedNames.length
             ? { stored_placeholders: `The stored text holds link placeholders: ${[...new Set(storedNames)].join(", ")}. Updating with this text, or running worldanvil_reformat_article, links the ones whose articles now exist.` }
@@ -763,15 +786,18 @@ export async function handleToolCall(name, args, client) {
         // The same anchor seed an update uses, so headings get the ids a
         // later upload of the same lore would give them.
         const seed = String(args.article_id ?? "");
+        const mainField = mainTextField(now);
         const parts = {
-          main_text: toEditorForm(now?.content, { anchorSeed: seed, paragraphs: true }),
+          main_text: toEditorForm(now?.[mainField], { anchorSeed: seed, paragraphs: true }),
           author_notes: toEditorForm(now?.authornotes, { anchorSeed: `${seed} notes`, paragraphs: "auto" }),
         };
-        // Link placeholders left in the stored text ([[Name]] written when
-        // the article did not exist yet, or by a run that stopped): the
-        // ones whose articles exist now are made into links.
+        // Link placeholders left in the stored text ({{Name}}, written
+        // when the article did not exist yet or by a run that stopped, or
+        // [[Name]] typed on the website): the ones whose articles exist now
+        // are made into links, and any other [[Name]] is rewritten as
+        // {{Name}}, which the site's editor leaves alone.
         const base = [
-          parts.main_text.status === "reformatted" ? parts.main_text.text : now?.content,
+          parts.main_text.status === "reformatted" ? parts.main_text.text : now?.[mainField],
           parts.author_notes.status === "reformatted" ? parts.author_notes.text : now?.authornotes,
         ];
         const marked = await resolveMarkers(base, client, {
@@ -782,7 +808,7 @@ export async function handleToolCall(name, args, client) {
         });
         const linkedNow = [0, 1].map((i) => typeof base[i] === "string" && marked.texts[i] !== base[i]);
         const data = {};
-        if (parts.main_text.status === "reformatted" || linkedNow[0]) data.content = marked.texts[0];
+        if (parts.main_text.status === "reformatted" || linkedNow[0]) data[mainField] = marked.texts[0];
         if (parts.author_notes.status === "reformatted" || linkedNow[1]) data.authornotes = marked.texts[1];
         const reformatting = [parts.main_text, parts.author_notes].some((p) => p.status === "reformatted");
         const linking = linkedNow.some(Boolean);
@@ -812,9 +838,10 @@ export async function handleToolCall(name, args, client) {
                   : ""),
           });
         const linkNote = linking
-          ? " Link placeholders whose articles now exist (see `links.linked`) " +
+          ? " Link placeholders " +
             (args.dry_run ? "would be" : "were") +
-            " made into links; that is the only change a reader sees."
+            " brought up to date (see `links`): those whose articles now exist become links, and any still waiting are " +
+            "stored as {{Name}}. That is the only change a reader sees."
           : "";
         if (args.dry_run)
           return jsonResponse({
@@ -829,7 +856,7 @@ export async function handleToolCall(name, args, client) {
           });
         if (args.fresh_backup) client.forgetRecentReads?.();
         const updated = await client.updateArticle(args.article_id, data);
-        const stored = await storedCheck(client, args.article_id, data, ["content", "authornotes"]);
+        const stored = await storedCheck(client, args.article_id, data, [mainField, "authornotes"]);
         return jsonResponse({
           ...answer,
           title: updated?.title ?? now?.title,

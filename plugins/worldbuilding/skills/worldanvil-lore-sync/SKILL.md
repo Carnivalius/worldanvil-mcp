@@ -93,9 +93,13 @@ changed rows again.
   repeats the title.
 - Link other articles as `[[Article Title]]` or
   `[[Article Title|words to show]]`. Use them freely, also for articles
-  that do not exist yet: such a marker is kept in the stored text as a
-  placeholder (the answer lists it under `links.waiting`) and becomes a
-  link once its article exists.
+  that do not exist yet: such a link is stored as a placeholder in
+  curly brackets, `{{Article Title}}` (the answer lists it under
+  `links.waiting`), and becomes a link once its article exists. On the
+  website a placeholder shows as written; square brackets are not used
+  for storing because the site's editor cuts them down. If the user
+  wants to add a placeholder while editing on the website, they type
+  `{{Article Title}}` there.
 - A batch of new articles that mention each other: just create them in
   turn. Links to articles not made yet are kept as placeholders. When
   the batch is done, run `worldanvil_reformat_article` on each article

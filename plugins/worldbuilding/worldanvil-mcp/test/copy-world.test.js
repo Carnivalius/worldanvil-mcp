@@ -262,10 +262,10 @@ describe("copy: harder cases", () => {
     const first = await run(acc, { confirm: true });
     expect(first.done).toBe(false);
     expect(first.remaining.links_to_finish).toBe(1);
-    expect(first.problems[0]).toMatch(/Links in "Alpha" could not be finished \(Access denied.*\[\[placeholders\]\] for now/);
+    expect(first.problems[0]).toMatch(/Links in "Alpha" could not be finished \(Access denied.*\{\{placeholders\}\} for now/);
     const alpha = () => acc.inWorld("article", TGT).find((x) => x.title === "Alpha");
     // Until then the copy holds a placeholder, which any later update or reformat can also finish.
-    expect(alpha().content).toBe("[p]See [[Beta]].[/p]");
+    expect(alpha().content).toBe("[p]See {{Beta}}.[/p]");
     const file = join(dir, "copies", readdirSync(join(dir, "copies"))[0]);
     expect(JSON.parse(readFileSync(file, "utf8"))).toHaveLength(1);
 
@@ -380,8 +380,9 @@ describe("repointMentions", () => {
   });
   it("writes a mention that cannot be made yet as a placeholder naming the article", () => {
     const pending = (title) => () => ({ pending: true, title });
-    expect(repointMentions(`@[Beta](Article:${id})`, pending("Beta")).text).toBe("[[Beta]]");
-    expect(repointMentions(`@[the town](Article:${id})`, pending("Beta")).text).toBe("[[Beta|the town]]");
+    expect(repointMentions(`@[Beta](Article:${id})`, pending("Beta")).text).toBe("{{Beta}}");
+    expect(repointMentions(`@[the town](Article:${id})`, pending("Beta")).text).toBe("{{Beta|the town}}");
+    expect(repointMentions(`@[the town](Article:${id})`, pending("Beta {old}")).text).toBe("the town");
     // A title or wording a placeholder cannot hold: plain words.
     expect(repointMentions(`@[the town](Article:${id})`, pending("Beta [old]")).text).toBe("the town");
     expect(repointMentions(`@[a|b](Article:${id})`, pending("Beta")).text).toBe("a|b");

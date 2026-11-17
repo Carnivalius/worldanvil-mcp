@@ -330,7 +330,25 @@ export function dropTitleHeading(markdown, title) {
 
 /** Code, where a link marker is just text: fenced blocks, `spans`, [code]. */
 const CODE_PARTS = /(```[\s\S]*?```|`[^`\n]*`|\[code\][\s\S]*?\[\/code\])/gi;
-const LINK_MARKER = /\[\[([^\[\]\n]+?)\]\]/g;
+// A link marker: [[Name]] as writers type it, or {{Name}} as a waiting
+// one is stored. Square brackets cannot be the stored form: World Anvil's
+// editor reads [words in brackets] as a tag, shows only the last word, and
+// writes that back when the page is saved there (seen live 2026-11-17).
+// Curly brackets are shown and saved exactly as written.
+const LINK_MARKER = /\[\[([^\[\]\n]+?)\]\]|\{\{([^{}\n]+?)\}\}/g;
+
+/**
+ * A link placeholder as it is stored on World Anvil while its article does
+ * not exist yet: {{Name}}, or {{Name|words to show}}.
+ */
+export function placeholderText(name, shown) {
+  return shown ? `{{${name}|${shown}}}` : `{{${name}}}`;
+}
+
+/** True when a name or wording can be written inside a placeholder. */
+export function fitsPlaceholder(text) {
+  return typeof text === "string" && text.trim() !== "" && !/[\[\]{}|\n]/.test(text);
+}
 
 /** A marker's two parts: the article's name, and its own shown text if any. */
 function markerParts(inside, whole) {
@@ -348,7 +366,9 @@ function eachLinkMarker(markdown, fn) {
   return String(markdown ?? "")
     .split(CODE_PARTS)
     .map((part, i) =>
-      i % 2 === 1 ? part : part.replace(LINK_MARKER, (whole, inside) => fn(markerParts(inside, whole), whole)),
+      i % 2 === 1
+        ? part
+        : part.replace(LINK_MARKER, (whole, square, curly) => fn(markerParts(square ?? curly, whole), whole)),
     )
     .join("");
 }

@@ -182,12 +182,12 @@ describe("reformat links leftover [[placeholders]]", () => {
     const answer = await reformat({}, client);
     expect(answer.status).toBe("linked");
     expect(client.updateArticle.mock.calls[0][1]).toEqual({
-      content: "[p]Seat of @[Queen Elara](Article:a2) and @[the queen](Article:a2), near [[Nowhere]].[/p]",
+      content: "[p]Seat of @[Queen Elara](Article:a2) and @[the queen](Article:a2), near {{Nowhere}}.[/p]",
       authornotes: "TODO: @[Queen Elara](Article:a2) needs a page of her own.",
     });
     expect(answer.links.linked.map((l) => l.name)).toEqual(["Queen Elara"]);
     expect(answer.links.waiting.map((w) => w.name)).toEqual(["Nowhere"]);
-    expect(answer.note).toMatch(/were made into links/);
+    expect(answer.note).toMatch(/were brought up to date/);
     expect(answer.stored).toMatch(/stored exactly as sent/);
   });
 
@@ -195,17 +195,29 @@ describe("reformat links leftover [[placeholders]]", () => {
     const client = linkClient({ content: "[p]Seat of [[Queen Elara]].[/p]" });
     const answer = await reformat({ dry_run: true }, client);
     expect(answer.status).toBe("would_link");
-    expect(answer.note).toMatch(/would be made into links/);
+    expect(answer.note).toMatch(/would be brought up to date/);
     expect(client.updateArticle).not.toHaveBeenCalled();
   });
 
   it("only placeholders still waiting: nothing is sent, and it says which", async () => {
-    const client = linkClient({ content: "[p]Near [[Nowhere]].[/p]" });
+    const client = linkClient({ content: "[p]Near {{Nowhere}}.[/p]" });
     const answer = await reformat({}, client);
     expect(answer.status).toBe("current");
     expect(answer.links.waiting.map((w) => w.name)).toEqual(["Nowhere"]);
     expect(answer.note).toMatch(/have no article yet and were left as they are/);
     expect(client.updateArticle).not.toHaveBeenCalled();
+  });
+
+  it("rewrites a waiting [[Name]] (typed on the website) as {{Name}}, which the site's editor leaves alone", async () => {
+    const client = linkClient({ content: "[p]Near [[Nowhere]] and [[Nowhere|a lost place]].[/p]" });
+    const answer = await reformat({}, client);
+    expect(answer.status).toBe("linked");
+    expect(client.updateArticle.mock.calls[0][1]).toEqual({ content: "[p]Near {{Nowhere}} and {{Nowhere|a lost place}}.[/p]" });
+    expect(answer.links.waiting.map((w) => w.name)).toEqual(["Nowhere"]);
+    // Run again: nothing left to do.
+    const again = await reformat({}, client);
+    expect(again.status).toBe("current");
+    expect(client.updateArticle).toHaveBeenCalledTimes(1);
   });
 
   it("reformats and links in one save", async () => {

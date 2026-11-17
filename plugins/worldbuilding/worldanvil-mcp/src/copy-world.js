@@ -20,8 +20,9 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { listAll, allArticles, titleKey } from "./listing.js";
-import { templateOfArticle, CATEGORY_DEFAULT_ICON } from "./article-templates.js";
+import { templateOfArticle, mainTextField, CATEGORY_DEFAULT_ICON } from "./article-templates.js";
 import { toEditorForm, compareAsRead } from "./reader-view.js";
+import { placeholderText, fitsPlaceholder } from "./utils.js";
 
 const lower = (id) => String(id ?? "").toLowerCase();
 
@@ -59,7 +60,7 @@ const HEADING_ANCHOR = new RegExp(`\\[h\\d?\\|${UUID}\\]`, "g");
  *   what a mentioned id is: copied already, a source article not copied
  *   yet, or not a source article at all (null: left exactly as written)
  * @returns {{ text: string, pending: number, otherIds: boolean }}
- *   pending: mentions written for now as [[Title|shown words]]
+ *   pending: mentions written for now as {{Title|shown words}}
  *   placeholders (plain words where a placeholder cannot say it);
  *   otherIds: the text still names some item by id (an image, a secret,
  *   an article outside the copy), which still points at the source world
@@ -74,9 +75,8 @@ export function repointMentions(text, lookup) {
       pending += 1;
       // A placeholder any later update or reformat can also finish. Not
       // every title or wording fits inside one: then plain words.
-      const fits = (t) => typeof t === "string" && t.trim() !== "" && !/[\[\]|\n]/.test(t);
-      if (!fits(hit.title) || !fits(shown)) return shown;
-      return shown.trim() === hit.title.trim() ? `[[${hit.title}]]` : `[[${hit.title}|${shown}]]`;
+      if (!fitsPlaceholder(hit.title) || !fitsPlaceholder(shown)) return shown;
+      return shown.trim() === hit.title.trim() ? placeholderText(hit.title) : placeholderText(hit.title, shown);
     }
     const mention = `@[${shown}](${kind}:${hit.targetId})`;
     made.push(mention);
@@ -369,7 +369,9 @@ export async function copyArticles(client, args, { budgetMs = COPY_BUDGET_MS, no
       const source = await client.getArticle(listed.id);
       const title = String(source?.title ?? listed.title);
       const cat = categoryOfArticle.get(lower(listed.id));
-      const main = editorText(source?.content, title, true);
+      // The main text is in `content`, or for a Prose article in `prose`.
+      const mainField = mainTextField(source);
+      const main = editorText(source?.[mainField], title, true);
       const notes = editorText(source?.authornotes, title, "auto");
       const linked = main.text === null ? null : repointMentions(main.text, lookup);
       const linkedNotes = notes.text === null ? null : repointMentions(notes.text, lookup);
@@ -379,7 +381,10 @@ export async function copyArticles(client, args, { budgetMs = COPY_BUDGET_MS, no
       if (typeof source?.articleMetadata === "string" && source.articleMetadata.trim())
         data.articleMetadata = source.articleMetadata;
       Object.assign(data, templateText(source));
-      if (linked) data.content = linked.text;
+      // A Prose article may hold text in `content` as well: carried as stored.
+      if (mainField !== "content" && typeof source?.content === "string" && source.content.trim())
+        data.content = source.content;
+      if (linked) data[mainField] = linked.text;
       if (linkedNotes) data.authornotes = linkedNotes.text;
       const icon = typeof source?.icon === "string" && source.icon ? source.icon : templateOfArticle(source)?.icon;
       if (icon) data.icon = icon;
@@ -408,8 +413,8 @@ export async function copyArticles(client, args, { budgetMs = COPY_BUDGET_MS, no
       const differs = Object.keys(data).filter((k) => typeof data[k] === "string" && k !== "state" && after?.[k] !== data[k]);
       const pendingHere = (linked?.pending ?? 0) + (linkedNotes?.pending ?? 0);
       const reads =
-        pendingHere === 0 && typeof source?.content === "string" && source.content.trim()
-          ? readsAs(source.content, after?.content)
+        pendingHere === 0 && typeof source?.[mainField] === "string" && source[mainField].trim()
+          ? readsAs(source[mainField], after?.[mainField])
           : null;
       if (differs.length) {
         line.check = `WARNING: stored differently from what was sent: ${differs.join(", ")}`;
@@ -484,25 +489,28 @@ export async function copyArticles(client, args, { budgetMs = COPY_BUDGET_MS, no
       const item = pending[0];
       try {
         const source = await client.getArticle(item.sourceId);
-        const main = editorText(source?.content, item.title, true);
+        const mainField = mainTextField(source);
+        const main = editorText(source?.[mainField], item.title, true);
         const notes = editorText(source?.authornotes, item.title, "auto");
         const data = {};
         const linked = main.text === null ? null : repointMentions(main.text, lookup);
         const linkedNotes = notes.text === null ? null : repointMentions(notes.text, lookup);
-        if (linked) data.content = linked.text;
+        if (linked) data[mainField] = linked.text;
         if (linkedNotes) data.authornotes = linkedNotes.text;
         await client.updateArticle(item.targetId, data);
         const after = await client.getArticle(item.targetId);
         const differs = Object.keys(data).filter((k) => after?.[k] !== data[k]);
         const reads =
-          typeof source?.content === "string" && source.content.trim() ? readsAs(source.content, after?.content) : null;
+          typeof source?.[mainField] === "string" && source[mainField].trim()
+            ? readsAs(source[mainField], after?.[mainField])
+            : null;
         if (differs.length || reads === "changed")
           problems.push(
             `Article "${item.title}": after its links were finished it ${differs.length ? "is stored differently from what was sent" : "does not read the same as the source"}.`,
           );
       } catch (e) {
         // Left for the next call: the copy itself is complete, its links are plain words for now.
-        linksStopped = `Links in "${item.title}" could not be finished (${e.message}). The article is copied; the names it links to are [[placeholders]] for now. Call again to finish them.`;
+        linksStopped = `Links in "${item.title}" could not be finished (${e.message}). The article is copied; the names it links to are {{placeholders}} for now. Call again to finish them.`;
         problems.push(linksStopped);
         break;
       }

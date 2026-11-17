@@ -146,6 +146,21 @@ export function templateOfArticle(article) {
 }
 
 /**
+ * The field that holds an article's main text: the one the site's editor
+ * shows as the page's own text box. Every template uses `content`, except
+ * Prose, whose editor shows its `prose` field and not `content` (seen live
+ * 2026-11-17: text sent as `content` to a Prose article was stored, and
+ * invisible in its editor).
+ *
+ * @param {object|string} article - an article as World Anvil returns it,
+ *   or a templateType
+ */
+export function mainTextField(article) {
+  const type = typeof article === "string" ? article : (article?.templateType ?? article?.entityClass);
+  return String(type ?? "").toLowerCase() === "prose" ? "prose" : "content";
+}
+
+/**
  * Work out the icon to store from what the caller asked for.
  *
  * - "default" gives the icon World Anvil itself would give (`fallback`).

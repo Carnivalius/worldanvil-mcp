@@ -1,11 +1,13 @@
 /**
  * Link placeholders, live: a [[Name]] whose article does not exist yet is
- * kept in the stored text, and the answer says so.
+ * kept in the stored text as {{Name}}, and the answer says so. (Stored in
+ * curly brackets since 2026-11-17: the site's editor cuts square ones down.)
  *
  *   WA_TEST_STAGE=update WA_TEST_PLACEHOLDERS=1 npm run test:live -- test/live/23-placeholders.live.test.js
  *
- *   1. The main text of one test article ("MCP-TEST-S1 Prose", in the
- *      first test world) is replaced with a short page holding one link
+ *   1. The main text of one test article ("MCP-TEST-S1 Generic", a
+ *      generic article in the first test world) is replaced with a short
+ *      page holding one link
  *      that can be made and two placeholders (one with its own shown
  *      words) for an article that does not exist.
  *   2. The answer names the kept placeholders and tells the session to
@@ -13,6 +15,11 @@
  *   3. A reformat dry run finds nothing to do and lists them as waiting.
  *
  * The article is left like this for a person to look at on the site.
+ *
+ * First run 2026-11-17 on "MCP-TEST-S1 Prose": stored correctly, but the
+ * site's editor for a Prose article shows its own `prose` box, not
+ * `content`, so nothing could be seen there. Hence a generic article,
+ * checked before anything is sent.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -21,7 +28,7 @@ import { createHarness } from "./harness/harness.js";
 const stage = process.env.WA_TEST_STAGE;
 const enabled = process.env.WA_TEST_PLACEHOLDERS === "1";
 
-const TITLE = "MCP-TEST-S1 Prose";
+const TITLE = "MCP-TEST-S1 Generic";
 const EXISTS = "MCP-TEST-S1 Organization";
 const MISSING = "MCP-TEST-Not Written Yet";
 
@@ -52,6 +59,9 @@ describe.runIf(enabled && stage === "update")("link placeholders in a stored art
   it("keeps the placeholders, makes the link, and says which is which", async () => {
     expect(h.aborted).toBe(false);
     expect(id, `"${TITLE}" is missing: run the stage 1 create`).toBeTruthy();
+    const before = await h.call("worldanvil_get_article", { article_id: id });
+    note(`template of "${TITLE}": ${before.data?.templateType}`);
+    expect(before.data?.templateType).toBe("article");
     const res = await h.call("worldanvil_update_article", { article_id: id, content: TEXT });
     expect(h.aborted, res.text).toBe(false);
     expect(res.isError, String(res.text).slice(0, 400)).toBeFalsy();
@@ -70,8 +80,9 @@ describe.runIf(enabled && stage === "update")("link placeholders in a stored art
     const res = await h.call("worldanvil_get_article", { article_id: id });
     const content = String(res.data.content);
     for (const line of content.split("\n")) note(`  ${line.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, "<id>")}`);
-    expect(content).toContain(`[[${MISSING}]]`);
-    expect(content).toContain(`[[${MISSING}|the unwritten page]]`);
+    expect(content).toContain(`{{${MISSING}}}`);
+    expect(content).toContain(`{{${MISSING}|the unwritten page}}`);
+    expect(content).not.toContain("[[");
     expect(content).toMatch(new RegExp(`@\\[${EXISTS}\\]\\(Article:[0-9a-f-]{36}\\)`));
     expect(res.data.state).toBe("private");
   });
