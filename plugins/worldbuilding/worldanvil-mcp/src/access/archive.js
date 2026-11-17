@@ -81,9 +81,13 @@ const asList = (value) =>
  * @param {string} args.what_was_done - one line: what became of it
  * @param {string[]} [args.articles] - titles of the articles it went into
  * @param {string} [args.source] - where the note was (a project's name, say)
- * @param {object} [opts] - { now, newId } for tests
+ * @param {object} [opts] - { now, newId, readFile } for tests
  */
-export async function archiveFile(client, args, { now = () => new Date(), newId = randomUUID } = {}) {
+export async function archiveFile(
+  client,
+  args,
+  { now = () => new Date(), newId = randomUUID, readFile = (path) => readFileSync(path, "utf8") } = {},
+) {
   const root = archiveRoot(client);
   const name = String(args.file_name ?? "").trim();
   const content = args.content;
@@ -101,7 +105,18 @@ export async function archiveFile(client, args, { now = () => new Date(), newId 
   mkdirSync(join(dir, "files"), { recursive: true });
 
   const hash = sha256(content);
-  const already = readLog(dir).find((e) => e.sha256 === hash && e.original_name === name);
+  // "Already archived" must be true of the saved copy, not just of the log:
+  // the file has to be there and still be this exact note.
+  const logged = readLog(dir).filter((e) => e.sha256 === hash && e.original_name === name);
+  const intact = (e) => {
+    const path = join(dir, "files", basename(String(e.file ?? "")));
+    try {
+      return existsSync(path) && sha256(readFile(path)) === hash;
+    } catch {
+      return false;
+    }
+  };
+  const already = logged.find(intact);
   if (already)
     return {
       archived: false,
@@ -129,12 +144,15 @@ export async function archiveFile(client, args, { now = () => new Date(), newId 
     characters: content.length,
     sha256: hash,
   };
-  appendFileSync(join(dir, "log.jsonl"), `${JSON.stringify(entry)}\n`, "utf8");
 
-  // Read back: the copy must be the note, exactly.
-  const saved = readFileSync(join(dir, "files", file), "utf8");
+  // Read back before logging: the copy must be the note, exactly. A copy
+  // that fails this gets no log line, so it can never count as archived.
+  const saved = readFile(join(dir, "files", file));
   if (saved !== content)
-    throw new Error(`The archived copy of "${name}" does not match the note. Do NOT remove the note from the project. Look in ${dir}.`);
+    throw new Error(
+      `The archived copy of "${name}" does not match the note, so it was not logged. Do NOT remove the note from the project. Look in ${dir}.`,
+    );
+  appendFileSync(join(dir, "log.jsonl"), `${JSON.stringify(entry)}\n`, "utf8");
 
   return {
     archived: true,
@@ -142,6 +160,12 @@ export async function archiveFile(client, args, { now = () => new Date(), newId 
     file,
     folder: join(dir, "files"),
     log_entries: readLog(dir).length,
+    ...(logged.length
+      ? {
+          earlier_copy:
+            "The log already had this note, but its saved file was missing or no longer matched. A fresh copy was saved; the old log line was left as it is.",
+        }
+      : {}),
     note:
       "A copy is saved and logged, and was read back to check it matches. The note can now be removed from the project " +
       "(remove it yourself if this session can change project files; otherwise list it for the user to remove).",

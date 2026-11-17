@@ -87,6 +87,39 @@ describe("archive a note", () => {
     expect(readLog(world)).toHaveLength(1);
   });
 
+  it("saves a fresh copy when the logged one is missing or no longer the note", async () => {
+    const dir = tempDir();
+    const first = await archiveFile(client(dir), note(), fixed());
+    const world = join(dir, "archive", readdirSync(join(dir, "archive"))[0]);
+    rmSync(join(world, "files", first.file));
+    const second = await archiveFile(client(dir), note(), fixed());
+    expect(second.archived).toBe(true);
+    expect(second.earlier_copy).toMatch(/missing or no longer matched/);
+    expect(readFileSync(join(world, "files", second.file), "utf8")).toBe(note().content);
+
+    writeFileSync(join(world, "files", second.file), "changed by hand");
+    const third = await archiveFile(client(dir), note(), fixed());
+    expect(third.archived).toBe(true);
+    expect(third.file).not.toBe(second.file);
+    expect(readLog(world)).toHaveLength(3);
+
+    const fourth = await archiveFile(client(dir), note(), fixed());
+    expect(fourth.archived).toBe(false);
+    expect(fourth.already_archived.file).toBe(third.file);
+  });
+
+  it("does not log a copy that fails the read-back, so a retry is not told it is already archived", async () => {
+    const dir = tempDir();
+    const bad = { ...fixed(), readFile: () => "not the note" };
+    await expect(archiveFile(client(dir), note(), bad)).rejects.toThrow(/was not logged\. Do NOT remove/);
+    const world = join(dir, "archive", readdirSync(join(dir, "archive"))[0]);
+    expect(readLog(world)).toHaveLength(0);
+    const retry = await archiveFile(client(dir), note(), fixed());
+    expect(retry.archived).toBe(true);
+    expect(retry.earlier_copy).toBeUndefined();
+    expect(readLog(world)).toHaveLength(1);
+  });
+
   it("keeps a changed note with the same name as a separate copy", async () => {
     const dir = tempDir();
     const first = await archiveFile(client(dir), note(), fixed());
