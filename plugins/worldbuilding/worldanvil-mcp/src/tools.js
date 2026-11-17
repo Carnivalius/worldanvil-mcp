@@ -291,7 +291,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_create_article",
       description:
-        "Create a new article in WorldAnvil. Refused, with nothing sent, if the world already has an article with the same title (capitals and extra spaces ignored): use a different title or update the existing article. It is created private and gets the same icon World Anvil gives that template; the answer's `privacy` confirms it is private. This tool never makes anything public (that is done on the World Anvil website). Put the lore in content and working notes in author_notes. To link to another article in the same world write [[Its Title]] in content or author_notes: it becomes a World Anvil mention (capitals and spacing aside; the answer's `links` says what was linked). To display other words for the link write [[Its Title|words to show]]. See unresolved_links for names that have no article. After saving, the article is read back: the answer's `stored` says whether the title and text World Anvil now holds are exactly what was sent, or warns where they differ (nothing is retried or undone). Do not open content with a heading that repeats the title: World Anvil shows the title itself, and such an opening heading is left out (the answer says so in `title_heading`). Markdown in content, author_notes and all template-specific fields is converted to the BBCode World Anvil's own editor writes (paragraphs, headings, lists, quotes, tables, links); BBCode already in the text is left as it is. Use the fields parameter to set template-specific fields like localization, manifestation, lawtype (for Natural Law), anatomy, traits (for Species), seeded, authornotes, etc.",
+        "Create a new article in WorldAnvil. Refused, with nothing sent, if the world already has an article with the same title (capitals and extra spaces ignored): use a different title or update the existing article. It is created private and gets the same icon World Anvil gives that template; the answer's `privacy` confirms it is private. This tool never makes anything public (that is done on the World Anvil website). Put the lore in content and working notes in author_notes. To link to another article in the same world write [[Its Title]] in content or author_notes: it becomes a World Anvil mention (capitals and spacing aside; the answer's `links` says what was linked). To display other words for the link write [[Its Title|words to show]]. A name with no article yet stays in the text as a [[placeholder]] and is linked later (see unresolved_links). After saving, the article is read back: the answer's `stored` says whether the title and text World Anvil now holds are exactly what was sent, or warns where they differ (nothing is retried or undone). Do not open content with a heading that repeats the title: World Anvil shows the title itself, and such an opening heading is left out (the answer says so in `title_heading`). Markdown in content, author_notes and all template-specific fields is converted to the BBCode World Anvil's own editor writes (paragraphs, headings, lists, quotes, tables, links); BBCode already in the text is left as it is. Use the fields parameter to set template-specific fields like localization, manifestation, lawtype (for Natural Law), anatomy, traits (for Species), seeded, authornotes, etc.",
       inputSchema: {
         type: "object",
         properties: {
@@ -318,9 +318,9 @@ export function getToolDefinitions() {
           },
           unresolved_links: {
             type: "string",
-            enum: ["refuse", "plain"],
+            enum: ["keep", "plain", "refuse"],
             description:
-              "What to do when a [[Name]] link in the text has no article, or several articles share the name. \"refuse\" (default): nothing is sent and the answer lists each problem name with near matches. \"plain\": those names are sent as ordinary text and listed in the answer; send the same text again later to link them (for a batch of new articles that mention each other).",
+              "What to do when a [[Name]] link in the text has no article yet, or several articles share the name. \"keep\" (default): the marker stays in the stored text exactly as written, as a placeholder; the answer lists it under `links.waiting` and says so in `links.tell_the_user` (always pass that on: the user may want the name corrected or the placeholder removed). It is made into a link once the article exists (by the next update of this text, or by worldanvil_reformat_article). Use it freely when writing many articles that are not all made yet. \"plain\": the words are stored without a link and the marker is gone. \"refuse\": nothing is sent and the answer lists each problem name with near matches.",
           },
           author_notes: {
             type: "string",
@@ -367,9 +367,31 @@ export function getToolDefinitions() {
       },
     },
     {
+      name: "worldanvil_copy_articles",
+      description:
+        "Copy categories, articles and their secrets from one world into another world of the same user. The source world is only read. Everything is created private. Each article keeps its title, template, icon, category, main text, author notes and template text fields; the text is copied by the tool exactly (written in the form World Anvil's editor uses where a reader would see no difference, otherwise as stored), and each copy is read back and compared with its source. Mentions of other copied articles are re-pointed at the copies. An article or secret whose title is already in the target is left alone, so a run can be repeated. Without confirm it changes nothing and answers with a preview: show that to the user and get their go-ahead first. With confirm: true each call works for about 40 seconds; while the answer says done: false, call again with the same arguments. Not copied: images, parent/child links between articles, display switches, dates, and other kinds of item (maps, timelines, manuscripts).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          source_world_id: { type: "string", description: "The world to copy from (read only)" },
+          target_world_id: { type: "string", description: "The world to copy into" },
+          category_id: {
+            type: "string",
+            description:
+              "Optional: a category of the source world. Only it, the categories under it and their articles are copied; it becomes a top-level category in the target.",
+          },
+          confirm: {
+            type: "boolean",
+            description: "true: do the copy. Left out: preview only, nothing is changed.",
+          },
+        },
+        required: ["source_world_id", "target_world_id"],
+      },
+    },
+    {
       name: "worldanvil_reformat_article",
       description:
-        "Bring an article stored in an older form up to the form World Anvil's editor writes today, without changing a word. It rewrites the stored main text and author notes themselves (old list items, headings without anchors, bare lines, old-style web links); no new text is given. It saves only if a reader would see no difference, and refuses otherwise, saying what would differ. An article already in the editor's form is left alone. A backup is taken first, privacy is not touched, and the answer's `stored` confirms what was saved. Use dry_run to see what would happen without saving. This does not restyle or rewrite lore (adding a summary or a contents list is a change of wording: use worldanvil_compare_article and worldanvil_update_article for that).",
+        "Bring an article stored in an older form up to the form World Anvil's editor writes today, without changing a word. It rewrites the stored main text and author notes themselves (old list items, headings without anchors, bare lines, old-style web links); no new text is given. It saves only if a reader would see no difference, and refuses otherwise, saying what would differ. An article already in the editor's form is left alone. It also finishes links: a [[Name]] placeholder left in the stored text, whose article now exists, is made into a link (the answer's `links` says which were linked and which are still waiting); that is the one change a reader can see. A backup is taken first, privacy is not touched, and the answer's `stored` confirms what was saved. Use dry_run to see what would happen without saving. This does not restyle or rewrite lore (adding a summary or a contents list is a change of wording: use worldanvil_compare_article and worldanvil_update_article for that).",
       inputSchema: {
         type: "object",
         properties: {
@@ -390,7 +412,7 @@ export function getToolDefinitions() {
     {
       name: "worldanvil_update_article",
       description:
-        "Update an existing article in WorldAnvil. A new title is refused if another article in the world already has it. If what is given is already exactly what World Anvil holds, nothing is sent (the answer says `unchanged`). Compare first with worldanvil_compare_article and pass its stamp as if_unchanged_since. To link to another article in the same world write [[Its Title]] in content or author_notes: it becomes a World Anvil mention (capitals and spacing aside; the answer's `links` says what was linked). To display other words for the link write [[Its Title|words to show]]. See unresolved_links for names that have no article. After saving, the article is read back: the answer's `stored` says whether the title and text World Anvil now holds are exactly what was sent, or warns where they differ (nothing is retried or undone). An opening heading in content that only repeats the title is left out (the answer says so in `title_heading`). Only what is passed changes: content replaces the main text, author_notes replaces the Author Notes section, and each leaves the other alone. Markdown in content, author_notes and template-specific fields is converted to the BBCode World Anvil's own editor writes; BBCode already in the text is left as it is. Can set a different icon or reset it to the template's own. Cannot change an article's template, except to a variant of the same one (Organization to Country, Military or Religion; Character to God/Deity).",
+        "Update an existing article in WorldAnvil. A new title is refused if another article in the world already has it. If what is given is already exactly what World Anvil holds, nothing is sent (the answer says `unchanged`). Compare first with worldanvil_compare_article and pass its stamp as if_unchanged_since. To link to another article in the same world write [[Its Title]] in content or author_notes: it becomes a World Anvil mention (capitals and spacing aside; the answer's `links` says what was linked). To display other words for the link write [[Its Title|words to show]]. A name with no article yet stays in the text as a [[placeholder]] and is linked later (see unresolved_links). After saving, the article is read back: the answer's `stored` says whether the title and text World Anvil now holds are exactly what was sent, or warns where they differ (nothing is retried or undone). An opening heading in content that only repeats the title is left out (the answer says so in `title_heading`). Only what is passed changes: content replaces the main text, author_notes replaces the Author Notes section, and each leaves the other alone. Markdown in content, author_notes and template-specific fields is converted to the BBCode World Anvil's own editor writes; BBCode already in the text is left as it is. Can set a different icon or reset it to the template's own. Cannot change an article's template, except to a variant of the same one (Organization to Country, Military or Religion; Character to God/Deity).",
       inputSchema: {
         type: "object",
         properties: {
@@ -425,9 +447,9 @@ export function getToolDefinitions() {
           },
           unresolved_links: {
             type: "string",
-            enum: ["refuse", "plain"],
+            enum: ["keep", "plain", "refuse"],
             description:
-              "What to do when a [[Name]] link in the text has no article, or several articles share the name. \"refuse\" (default): nothing is sent and the answer lists each problem name with near matches. \"plain\": those names are sent as ordinary text and listed in the answer; send the same text again later to link them (for a batch of new articles that mention each other).",
+              "What to do when a [[Name]] link in the text has no article yet, or several articles share the name. \"keep\" (default): the marker stays in the stored text exactly as written, as a placeholder; the answer lists it under `links.waiting` and says so in `links.tell_the_user` (always pass that on: the user may want the name corrected or the placeholder removed). It is made into a link once the article exists (by the next update of this text, or by worldanvil_reformat_article). Use it freely when writing many articles that are not all made yet. \"plain\": the words are stored without a link and the marker is gone. \"refuse\": nothing is sent and the answer lists each problem name with near matches.",
           },
           author_notes: {
             type: "string",
@@ -824,7 +846,8 @@ export function getToolDefinitions() {
     },
     {
       name: "worldanvil_create_secret",
-      description: "Create secret",
+      description:
+        "Create a secret (hidden text, optionally attached to an article). It is created private; the answer's `privacy` line says whether World Anvil applied that. Markdown in `content` is converted to World Anvil's format.",
       inputSchema: {
         type: "object",
         properties: {

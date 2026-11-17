@@ -139,7 +139,7 @@ for (const [group, resources] of Object.entries(GROUP_RESOURCES)) {
  */
 function getToolGroup(toolName) {
   const resource = toolName.replace(
-    /^worldanvil_(get|list|find|create|update|delete|backup|search|compare|restore|reformat)_/,
+    /^worldanvil_(get|list|find|create|update|delete|backup|search|compare|restore|reformat|copy)_/,
     "",
   );
   return RESOURCE_TO_GROUP.get(resource) || "core";
@@ -189,6 +189,7 @@ export function filterTools(tools, enabledGroups) {
 /** What each tool-name verb does to a world. Anything else only reads. */
 const VERB_ACTIONS = {
   create: "create",
+  copy: "create",
   update: "update",
   reformat: "update",
   restore: "update",

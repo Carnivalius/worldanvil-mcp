@@ -31,6 +31,7 @@ import {
 import { compareAsRead, toEditorForm } from "./reader-view.js";
 import { backupWorld } from "./access/world-backup.js";
 import { actionsAnyWorldAllows } from "./access/guard.js";
+import { copyArticles } from "./copy-world.js";
 import { backupItem, compareBackup, listBackups, restoreItem, searchBackups } from "./access/lookback.js";
 
 /**
@@ -61,6 +62,123 @@ export function sanitizeFields(fields) {
   return convertFieldsToBBCode(fields);
 }
 
+/** A link marker written out again, as the writer wrote it. */
+function markerText(name, shown) {
+  return shown ? `[[${name}|${shown}]]` : `[[${name}]]`;
+}
+
+/**
+ * Turn the [[Name]] and [[Name|shown text]] link markers in some texts
+ * into mentions of the articles with those titles, in one world.
+ *
+ * Works on Markdown about to be converted and on text already stored on
+ * World Anvil alike (a marker reads the same in both). A name with no
+ * article, or shared by several, is handled as `unresolved` says:
+ *   "keep"    the marker stays in the text as written: a placeholder
+ *             that is made into a link once the article exists
+ *   "plain"   the words are written without a link, and the marker is gone
+ *   "refuse"  nothing is sent: an Error names what could not be linked
+ * An article never links to itself: its own name is written as plain words.
+ *
+ * `about` may give each of these as a value or a function fetching it,
+ * called only when a marker is found: worldId, articles, selfId, title.
+ *
+ * @returns {{ texts: Array, links: object|null }} links: what became of
+ *   each name (`linked`, `plain`, and `waiting` for markers kept)
+ */
+async function resolveMarkers(texts, client, about = {}) {
+  const unresolved = about.unresolved ?? "keep";
+  const get = async (value) => (typeof value === "function" ? await value() : value);
+  const names = [];
+  for (const text of texts)
+    if (typeof text === "string")
+      for (const name of linkMarkerNames(text))
+        if (!names.some((n) => titleKey(n) === titleKey(name))) names.push(name);
+  if (names.length === 0) return { texts, links: null };
+
+  const worldId = await get(about.worldId);
+  if (!worldId)
+    throw new Error("Could not tell which world this article is in, so its [[links]] could not be looked up. Nothing was sent.");
+  const found = await findArticles(client, worldId, names, await get(about.articles));
+  const selfId = String((await get(about.selfId)) ?? "").toLowerCase();
+  const selfTitle = titleKey(await get(about.title));
+
+  // The words each name is shown as, where the writer gave their own.
+  const shownAs = new Map();
+  for (const text of texts)
+    if (typeof text === "string")
+      for (const { name, shown } of linkMarkers(text))
+        if (shown) {
+          const key = titleKey(name);
+          if (!shownAs.has(key)) shownAs.set(key, []);
+          if (!shownAs.get(key).includes(shown)) shownAs.get(key).push(shown);
+        }
+  const withShown = (key, entry) => (shownAs.has(key) ? { ...entry, shown_as: shownAs.get(key) } : entry);
+
+  // name -> { id, title } for a mention, "keep" for the marker as written,
+  // or null for plain words.
+  const replacement = new Map();
+  const links = { linked: [], plain: [] };
+  const waiting = [];
+  const problems = [];
+  for (const r of found.results) {
+    const key = titleKey(r.asked);
+    const isSelf =
+      (selfTitle && key === selfTitle) ||
+      (r.status === "found" && selfId && String(r.id).toLowerCase() === selfId);
+    if (isSelf) {
+      replacement.set(key, null);
+      links.plain.push(withShown(key, { name: r.asked, why: "the article itself" }));
+    } else if (r.status === "found") {
+      replacement.set(key, { id: r.id, title: r.title });
+      links.linked.push(withShown(key, { name: r.asked, title: r.title, id: r.id }));
+    } else {
+      const why =
+        r.status === "more_than_one"
+          ? `${r.matches.length} articles share this title (ids ${r.matches.map((m) => m.id).join(", ")})`
+          : "no article with this title" +
+            (r.suggestions ? ` (near: ${r.suggestions.map((s) => `"${s.title}"`).join(", ")})` : "");
+      if (unresolved === "keep") {
+        replacement.set(key, "keep");
+        waiting.push(withShown(key, { name: r.asked, why }));
+      } else {
+        replacement.set(key, null);
+        links.plain.push(withShown(key, { name: r.asked, why }));
+      }
+      problems.push(`[[${r.asked}]]: ${why}`);
+    }
+  }
+  if (problems.length > 0 && unresolved === "refuse")
+    throw new Error(
+      `${problems.length === 1 ? "A link" : `${problems.length} links`} could not be made. ${problems.join("; ")}. ` +
+        "Nothing was sent. Correct the names, or create the missing articles first, or leave unresolved_links out " +
+        "to keep these markers in the text as placeholders that are linked once their articles exist.",
+    );
+  if (waiting.length) {
+    links.waiting = waiting;
+    // Said in so many words, so the session tells the user: a kept
+    // placeholder shows in the article, and may not be wanted there.
+    const names = waiting.map((w) => `[[${w.name}]]`).join(", ");
+    links.tell_the_user =
+      `${waiting.length === 1 ? "1 link was" : `${waiting.length} links were`} not made and ` +
+      `${waiting.length === 1 ? "is" : "are"} kept in the text as ${waiting.length === 1 ? "a placeholder" : "placeholders"}: ${names}. ` +
+      "Tell the user which, and why (see `waiting`). Each becomes a link once its article exists (on the next update of this text, " +
+      "or with worldanvil_reformat_article). If one is not wanted, correct the name, or remove it: send the text again " +
+      'without the brackets, or with unresolved_links: "plain" to store the plain words.';
+  }
+  // A mention shows the article's real title unless the writer gave
+  // their own words; an unlinked name shows as it was written.
+  const swap = (text) =>
+    typeof text === "string"
+      ? replaceLinkMarkers(text, (name, shown) => {
+          const target = replacement.get(titleKey(name));
+          if (target === "keep") return markerText(name, shown);
+          return target ? `@[${shown ?? target.title}](Article:${target.id})` : (shown ?? name);
+        })
+      : text;
+  return { texts: texts.map(swap), links };
+}
+
 /**
  * An article's main text and author notes, ready to send.
  * format "markdown" (the default): converted to the BBCode World Anvil's
@@ -89,9 +207,9 @@ async function articleText(args, anchorSeed, client, about = {}) {
   const format = args.format === undefined ? "markdown" : String(args.format).toLowerCase();
   if (format !== "markdown" && format !== "bbcode")
     throw new Error(`format must be "markdown" or "bbcode", not "${args.format}"`);
-  const unresolved = args.unresolved_links === undefined ? "refuse" : String(args.unresolved_links).toLowerCase();
-  if (unresolved !== "refuse" && unresolved !== "plain")
-    throw new Error(`unresolved_links must be "refuse" or "plain", not "${args.unresolved_links}"`);
+  const unresolved = args.unresolved_links === undefined ? "keep" : String(args.unresolved_links).toLowerCase();
+  if (!["keep", "plain", "refuse"].includes(unresolved))
+    throw new Error(`unresolved_links must be "keep", "plain" or "refuse", not "${args.unresolved_links}"`);
   const asWritten = format === "bbcode";
   const get = async (value) => (typeof value === "function" ? await value() : value);
 
@@ -108,76 +226,9 @@ async function articleText(args, anchorSeed, client, about = {}) {
         note = `The opening heading "${cut.dropped}" was left out because it repeats the article's title, which World Anvil already shows above the text.`;
     }
 
-    const names = [];
-    for (const text of [content, notes])
-      if (typeof text === "string")
-        for (const name of linkMarkerNames(text))
-          if (!names.some((n) => titleKey(n) === titleKey(name))) names.push(name);
-
-    if (names.length > 0) {
-      const worldId = await get(about.worldId);
-      if (!worldId)
-        throw new Error("Could not tell which world this article is in, so its [[links]] could not be looked up. Nothing was sent.");
-      const found = await findArticles(client, worldId, names, await get(about.articles));
-      const selfId = String((await get(about.selfId)) ?? "").toLowerCase();
-      const selfTitle = titleKey(await get(about.title));
-
-      // The words each name is shown as, where the writer gave their own.
-      const shownAs = new Map();
-      for (const text of [content, notes])
-        if (typeof text === "string")
-          for (const { name, shown } of linkMarkers(text))
-            if (shown) {
-              const key = titleKey(name);
-              if (!shownAs.has(key)) shownAs.set(key, []);
-              if (!shownAs.get(key).includes(shown)) shownAs.get(key).push(shown);
-            }
-      const withShown = (key, entry) => (shownAs.has(key) ? { ...entry, shown_as: shownAs.get(key) } : entry);
-
-      // name -> { id } for a mention, or null for plain words.
-      const replacement = new Map();
-      links = { linked: [], plain: [] };
-      const problems = [];
-      for (const r of found.results) {
-        const key = titleKey(r.asked);
-        const isSelf =
-          (selfTitle && key === selfTitle) ||
-          (r.status === "found" && selfId && String(r.id).toLowerCase() === selfId);
-        if (isSelf) {
-          replacement.set(key, null);
-          links.plain.push(withShown(key, { name: r.asked, why: "the article itself" }));
-        } else if (r.status === "found") {
-          replacement.set(key, { id: r.id, title: r.title });
-          links.linked.push(withShown(key, { name: r.asked, title: r.title, id: r.id }));
-        } else {
-          const why =
-            r.status === "more_than_one"
-              ? `${r.matches.length} articles share this title (ids ${r.matches.map((m) => m.id).join(", ")})`
-              : "no article with this title" +
-                (r.suggestions ? ` (near: ${r.suggestions.map((s) => `"${s.title}"`).join(", ")})` : "");
-          replacement.set(key, null);
-          links.plain.push(withShown(key, { name: r.asked, why }));
-          problems.push(`[[${r.asked}]]: ${why}`);
-        }
-      }
-      if (problems.length > 0 && unresolved === "refuse")
-        throw new Error(
-          `${problems.length === 1 ? "A link" : `${problems.length} links`} could not be made. ${problems.join("; ")}. ` +
-            "Nothing was sent. Correct the names, or create the missing articles first, or pass " +
-            'unresolved_links: "plain" to send these names as ordinary text (and send the text again later to link them).',
-        );
-      // A mention shows the article's real title unless the writer gave
-      // their own words; an unlinked name shows as it was written.
-      const swap = (text) =>
-        typeof text === "string"
-          ? replaceLinkMarkers(text, (name, shown) => {
-              const target = replacement.get(titleKey(name));
-              return target ? `@[${shown ?? target.title}](Article:${target.id})` : (shown ?? name);
-            })
-          : text;
-      content = swap(content);
-      notes = swap(notes);
-    }
+    const done = await resolveMarkers([content, notes], client, { ...about, unresolved });
+    [content, notes] = done.texts;
+    links = done.links;
   }
 
   const fields = {};
@@ -203,6 +254,29 @@ async function confirmArticlePrivate(client, created) {
     if (state === "private") return "private";
     await client.updateArticle(created.id, { state: "private" });
     const after = await client.getArticle(created.id);
+    return after?.state === "private"
+      ? `private (World Anvil created it as "${state}"; set to private straight afterwards)`
+      : warn(`World Anvil created it as "${state}" and it could not be set to private.`);
+  } catch (e) {
+    return warn(`Couldn't confirm it is private (${e.message}).`);
+  }
+}
+
+/**
+ * The same for a new secret: asked for as private in the create request,
+ * then confirmed. A secret World Anvil made with another state is set to
+ * private straight away; anything unconfirmed is a loud warning.
+ */
+export async function confirmSecretPrivate(client, created) {
+  const warn = (why) =>
+    `WARNING: ${why} Check this secret's privacy on the World Anvil website.`;
+  try {
+    if (!created?.id) return warn("World Anvil didn't return the new secret's id.");
+    let state = created.state;
+    if (state === undefined) state = (await client.getSecret(created.id))?.state;
+    if (state === "private") return "private";
+    await client.updateSecret(created.id, { state: "private" });
+    const after = await client.getSecret(created.id);
     return after?.state === "private"
       ? `private (World Anvil created it as "${state}"; set to private straight afterwards)`
       : warn(`World Anvil created it as "${state}" and it could not be set to private.`);
@@ -442,6 +516,9 @@ export async function handleToolCall(name, args, client) {
           }),
         );
 
+      case "worldanvil_copy_articles":
+        return jsonResponse(await copyArticles(client, args));
+
       case "worldanvil_backup_item":
         return jsonResponse(await backupItem(client, args));
 
@@ -631,10 +708,11 @@ export async function handleToolCall(name, args, client) {
           throw new Error("Give content, author_notes, or both, to compare with the article.");
         const now = await client.getArticle(args.article_id);
         // The same preparation an update would do, so the comparison is
-        // with exactly what an update would send. Names that can't be
-        // linked are left as text here: this tool only looks.
+        // with exactly what an update would send. This tool only looks, so
+        // it never refuses over a name with no article: such a marker is
+        // kept, as an update keeps it by default.
         const text = await articleText(
-          { unresolved_links: "plain", ...args },
+          { ...args, unresolved_links: args.unresolved_links === "plain" ? "plain" : "keep" },
           String(args.article_id ?? ""),
           client,
           { title: now?.title, worldId: now?.world?.id, selfId: args.article_id },
@@ -650,7 +728,11 @@ export async function handleToolCall(name, args, client) {
           : statuses.includes("format_only")
             ? "format_only"
             : "same";
-        const unlinked = (text.links?.plain ?? []).filter((p) => p.why !== "the article itself");
+        const unlinked = text.links?.waiting ?? [];
+        // Placeholders in what World Anvil holds now, for the parts being compared.
+        const storedNames = [];
+        if (text.fields.content !== undefined) storedNames.push(...linkMarkerNames(now?.content));
+        if (text.fields.authornotes !== undefined) storedNames.push(...linkMarkerNames(now?.authornotes));
         return jsonResponse({
           article_id: args.article_id,
           title: now?.title,
@@ -661,7 +743,10 @@ export async function handleToolCall(name, args, client) {
           ...(text.note ? { title_heading: text.note } : {}),
           ...(text.links ? { links: text.links } : {}),
           ...(unlinked.length
-            ? { unlinked_names: `An update would refuse these [[links]] unless unresolved_links is "plain": ${unlinked.map((p) => p.name).join(", ")}.` }
+            ? { unlinked_names: `No article yet for: ${unlinked.map((p) => p.name).join(", ")}. An update keeps each as a [[placeholder]] in the text, to be linked once its article exists.` }
+            : {}),
+          ...(storedNames.length
+            ? { stored_placeholders: `The stored text holds link placeholders: ${[...new Set(storedNames)].join(", ")}. Updating with this text, or running worldanvil_reformat_article, links the ones whose articles now exist.` }
             : {}),
           note:
             overall === "same"
@@ -682,9 +767,25 @@ export async function handleToolCall(name, args, client) {
           main_text: toEditorForm(now?.content, { anchorSeed: seed, paragraphs: true }),
           author_notes: toEditorForm(now?.authornotes, { anchorSeed: `${seed} notes`, paragraphs: "auto" }),
         };
+        // Link placeholders left in the stored text ([[Name]] written when
+        // the article did not exist yet, or by a run that stopped): the
+        // ones whose articles exist now are made into links.
+        const base = [
+          parts.main_text.status === "reformatted" ? parts.main_text.text : now?.content,
+          parts.author_notes.status === "reformatted" ? parts.author_notes.text : now?.authornotes,
+        ];
+        const marked = await resolveMarkers(base, client, {
+          worldId: now?.world?.id,
+          selfId: args.article_id,
+          title: now?.title,
+          unresolved: "keep",
+        });
+        const linkedNow = [0, 1].map((i) => typeof base[i] === "string" && marked.texts[i] !== base[i]);
         const data = {};
-        if (parts.main_text.status === "reformatted") data.content = parts.main_text.text;
-        if (parts.author_notes.status === "reformatted") data.authornotes = parts.author_notes.text;
+        if (parts.main_text.status === "reformatted" || linkedNow[0]) data.content = marked.texts[0];
+        if (parts.author_notes.status === "reformatted" || linkedNow[1]) data.authornotes = marked.texts[1];
+        const reformatting = [parts.main_text, parts.author_notes].some((p) => p.status === "reformatted");
+        const linking = linkedNow.some(Boolean);
         // The answer says what happened to each part, not the text itself.
         const report = (p) => {
           const { text, ...rest } = p;
@@ -696,6 +797,7 @@ export async function handleToolCall(name, args, client) {
           state: now?.state ?? null,
           main_text: report(parts.main_text),
           author_notes: report(parts.author_notes),
+          ...(marked.links ? { links: marked.links } : {}),
         };
         const refused = Object.values(parts).some((p) => p.status === "refused");
         if (Object.keys(data).length === 0)
@@ -704,13 +806,26 @@ export async function handleToolCall(name, args, client) {
             status: refused ? "refused" : "current",
             note: refused
               ? "Nothing was sent. See `why` for the part that could not be rewritten."
-              : "Already in the form World Anvil's editor writes. Nothing was sent.",
+              : "Already in the form World Anvil's editor writes. Nothing was sent." +
+                (marked.links?.waiting
+                  ? " The link placeholders under `links.waiting` have no article yet and were left as they are."
+                  : ""),
           });
+        const linkNote = linking
+          ? " Link placeholders whose articles now exist (see `links.linked`) " +
+            (args.dry_run ? "would be" : "were") +
+            " made into links; that is the only change a reader sees."
+          : "";
         if (args.dry_run)
           return jsonResponse({
             ...answer,
-            status: "would_reformat",
-            note: "Dry run: nothing was sent. Without dry_run the parts marked reformatted would be rewritten in the editor's form; a reader would see no difference.",
+            status: reformatting ? "would_reformat" : "would_link",
+            note:
+              "Dry run: nothing was sent." +
+              (reformatting
+                ? " Without dry_run the parts marked reformatted would be rewritten in the editor's form; a reader would see no difference."
+                : "") +
+              linkNote,
           });
         if (args.fresh_backup) client.forgetRecentReads?.();
         const updated = await client.updateArticle(args.article_id, data);
@@ -718,10 +833,14 @@ export async function handleToolCall(name, args, client) {
         return jsonResponse({
           ...answer,
           title: updated?.title ?? now?.title,
-          status: "reformatted",
+          status: reformatting ? "reformatted" : "linked",
           ...(stored ? { stored } : {}),
           note:
-            "Rewritten in the form World Anvil's editor writes. The wording is untouched: it was checked that a reader sees no difference. A backup of the earlier text was taken first." +
+            (reformatting
+              ? "Rewritten in the form World Anvil's editor writes. The wording is untouched: it was checked that a reader sees no difference."
+              : "The wording is untouched.") +
+            linkNote +
+            " A backup of the earlier text was taken first." +
             (refused ? " One part could not be rewritten: see its `why`." : ""),
         });
       }
@@ -907,7 +1026,11 @@ export async function handleToolCall(name, args, client) {
         if (args.content !== undefined)
           data.content = markdownToBBCode(args.content);
         if (args.article_id) data.article = { id: args.article_id };
-        return jsonResponse(await client.createSecret(data));
+        // Private, like everything else these tools make.
+        data.state = "private";
+        const created = await client.createSecret(data);
+        const privacy = await confirmSecretPrivate(client, created);
+        return jsonResponse({ ...created, privacy });
       }
 
       case "worldanvil_update_secret": {

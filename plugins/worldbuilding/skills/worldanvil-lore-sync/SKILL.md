@@ -92,11 +92,18 @@ changed rows again.
 - Write the text in Markdown. Do not start it with a heading that
   repeats the title.
 - Link other articles as `[[Article Title]]` or
-  `[[Article Title|words to show]]`.
-- A batch of new articles that mention each other: create them all with
-  `unresolved_links: "plain"`, then send each one's text again with
-  `worldanvil_update_article` (stamp from the create answer or a fresh
-  compare) so the links are made.
+  `[[Article Title|words to show]]`. Use them freely, also for articles
+  that do not exist yet: such a marker is kept in the stored text as a
+  placeholder (the answer lists it under `links.waiting`) and becomes a
+  link once its article exists.
+- A batch of new articles that mention each other: just create them in
+  turn. Links to articles not made yet are kept as placeholders. When
+  the batch is done, run `worldanvil_reformat_article` on each article
+  whose answer had `links.waiting`: it turns the placeholders whose
+  articles now exist into links. Report any still waiting at the end
+  (an article not written yet, or a name that needs correcting).
+- Never pass `unresolved_links: "plain"` unless the user asks for a name
+  to stay unlinked: it drops the marker for good.
 - A duplicate title is refused. Do not work round it; ask the user
   whether to update the existing article or rename one.
 
@@ -123,7 +130,10 @@ changed rows again.
 After each create, update or reformat, read:
 - `stored`: must say it is stored exactly as sent. A WARNING goes in the
   report with its detail.
-- `links`: which names were linked and which were left as plain text.
+- `links`: which names were linked, and which were kept as
+  placeholders (`waiting`). Whenever the answer has `links.tell_the_user`,
+  tell the user which links were not made and why, and ask whether each
+  should wait for its article, be corrected, or be removed.
 - `title_heading`: says if an opening heading was left out.
 
 Anything not clean is reported, not fixed quietly.

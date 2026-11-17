@@ -372,6 +372,37 @@ describe("Secret handlers", () => {
       expect(payload.world).toEqual({ id: "world-1" });
     });
 
+    it("asks for the secret to be private and says whether it is", async () => {
+      const made = makeMockClient({
+        createSecret: vi.fn(async () => ({ id: "sec-1" })),
+        getSecret: vi.fn(async () => ({ id: "sec-1", state: "private" })),
+      });
+      const r = await handleToolCall("worldanvil_create_secret", { title: "Hidden Truth", world_id: "world-1" }, made);
+      expect(made.createSecret.mock.calls[0][0].state).toBe("private");
+      expect(JSON.parse(r.content[0].text).privacy).toBe("private");
+      expect(made.updateSecret).not.toHaveBeenCalled();
+    });
+
+    it("sets a secret private straight away if World Anvil made it otherwise", async () => {
+      let state = "public";
+      const made = makeMockClient({
+        createSecret: vi.fn(async () => ({ id: "sec-1" })),
+        getSecret: vi.fn(async () => ({ id: "sec-1", state })),
+        updateSecret: vi.fn(async (id, data) => {
+          state = data.state;
+          return { id };
+        }),
+      });
+      const r = await handleToolCall("worldanvil_create_secret", { title: "Hidden Truth", world_id: "world-1" }, made);
+      expect(made.updateSecret).toHaveBeenCalledWith("sec-1", { state: "private" });
+      expect(JSON.parse(r.content[0].text).privacy).toMatch(/^private \(World Anvil created it as "public"/);
+    });
+
+    it("warns loudly when privacy cannot be confirmed", async () => {
+      const r = await handleToolCall("worldanvil_create_secret", { title: "Hidden Truth", world_id: "world-1" }, client);
+      expect(JSON.parse(r.content[0].text).privacy).toMatch(/^WARNING: /);
+    });
+
     it("passes article_id as nested object", async () => {
       await handleToolCall(
         "worldanvil_create_secret",

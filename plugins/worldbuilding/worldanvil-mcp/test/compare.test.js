@@ -229,9 +229,22 @@ describe("compare article tool", () => {
   });
 
   it("does not refuse over a name with no article: it only looks, and says so", async () => {
-    const answer = await compare({ content: "Near [[Nowhere]]." }, articleClient(base({ content: "[p]Near Nowhere.[/p]" })));
+    const answer = await compare(
+      { content: "Near [[Nowhere]]." },
+      articleClient(base({ content: "[p]Near [[Nowhere]].[/p]" })),
+    );
     expect(answer.status).toBe("same");
-    expect(answer.unlinked_names).toMatch(/Nowhere/);
+    expect(answer.unlinked_names).toMatch(/No article yet for: Nowhere.*placeholder/);
+    expect(answer.stored_placeholders).toMatch(/holds link placeholders: Nowhere/);
+  });
+
+  it("asked to refuse, it still only looks; asked for plain words, it compares plain words", async () => {
+    const stored = articleClient(base({ content: "[p]Near Nowhere.[/p]" }));
+    const refuse = await compare({ content: "Near [[Nowhere]].", unresolved_links: "refuse" }, stored);
+    expect(refuse.status).toBe("changed");
+    const plain = await compare({ content: "Near [[Nowhere]].", unresolved_links: "plain" }, stored);
+    expect(plain.status).toBe("same");
+    expect(plain.stored_placeholders).toBeUndefined();
   });
 
   it("an article with no text yet compares as all added", async () => {

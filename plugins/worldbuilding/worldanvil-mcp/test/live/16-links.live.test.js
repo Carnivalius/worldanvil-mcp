@@ -5,7 +5,9 @@
  *
  *   WA_TEST_STAGE=update WA_TEST_LINKS=1 npm run test:live -- test/live/16-links.live.test.js
  *
- *   1. Default: the update is refused and nothing changes.
+ *   1. unresolved_links "refuse": the update is refused and nothing
+ *      changes. (This was the default when the test was first run; the
+ *      default is now to keep the marker as a placeholder.)
  *   2. unresolved_links "plain": the found name is stored as a mention in
  *      the form World Anvil's editor writes, the other as ordinary text;
  *      the main text does not move.
@@ -52,8 +54,12 @@ describe.runIf(enabled && stage === "update")("links in author notes", () => {
     before = res.data;
   });
 
-  it("refuses by default when a name has no article, and changes nothing", async () => {
-    const res = await h.call("worldanvil_update_article", { article_id: loreId, author_notes: NOTES });
+  it('with "refuse", refuses when a name has no article, and changes nothing', async () => {
+    const res = await h.call("worldanvil_update_article", {
+      article_id: loreId,
+      author_notes: NOTES,
+      unresolved_links: "refuse",
+    });
     note(`default: ${String(res.text).slice(0, 500)}`);
     expect(h.aborted, res.text).toBe(false);
     expect(res.isError).toBeTruthy();

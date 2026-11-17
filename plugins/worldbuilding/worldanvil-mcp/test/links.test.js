@@ -118,17 +118,55 @@ describe("create article with [[links]]", () => {
     expect(client.listArticles).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses, sending nothing, when a name has no article, and suggests near ones", async () => {
+  it("by default keeps a name with no article as a placeholder in the text, and says which", async () => {
     const client = worldClient();
-    await expect(create({ content: "Near the [[Iron Mountains]] and [[Nowhere]]." }, client)).rejects.toThrow(
-      /2 links could not be made\. \[\[Iron Mountains\]\]: no article with this title \(near: "The Iron Mountains"\); \[\[Nowhere\]\]: no article with this title\. Nothing was sent\..*unresolved_links: "plain"/s,
+    const answer = await create(
+      { content: "[[Queen Elara]] visited [[Nowhere]], [[Nowhere|a lost place]] and the [[Silver Order]]." },
+      client,
+    );
+    expect(sent(client).content).toBe(
+      "[p]@[Queen Elara](Article:a-1) visited [[Nowhere]], [[Nowhere|a lost place]] and the [[Silver Order]].[/p]",
+    );
+    expect(answer.links.linked.map((l) => l.id)).toEqual(["a-1"]);
+    expect(answer.links.plain).toEqual([]);
+    expect(answer.links.waiting).toEqual([
+      { name: "Nowhere", why: "no article with this title", shown_as: ["a lost place"] },
+      { name: "Silver Order", why: "2 articles share this title (ids a-4, a-5)" },
+    ]);
+    // The session is told in words, so it can tell the user.
+    expect(answer.links.tell_the_user).toMatch(
+      /^2 links were not made and are kept in the text as placeholders: \[\[Nowhere\]\], \[\[Silver Order\]\]\. Tell the user/,
+    );
+    expect(answer.links.tell_the_user).toMatch(/If one is not wanted.*unresolved_links: "plain"/);
+  });
+
+  it("says nothing of the kind when every link was made", async () => {
+    const answer = await create({ content: "[[Queen Elara]] rules." }, worldClient());
+    expect(answer.links.waiting).toBeUndefined();
+    expect(answer.links.tell_the_user).toBeUndefined();
+  });
+
+  it("keeps placeholders in author notes too, and through headings and lists", async () => {
+    const client = worldClient();
+    await create({ content: "## About [[Nowhere]]\n\n- See [[Nowhere]]", author_notes: "TODO: write [[Nowhere]]." }, client);
+    expect(sent(client).content).toMatch(/\]About \[\[Nowhere\]\]\[\/h2\]/);
+    expect(sent(client).content).toMatch(/- See \[\[Nowhere\]\]/);
+    expect(sent(client).authornotes).toBe("TODO: write [[Nowhere]].");
+  });
+
+  it("with unresolved_links refuse: sends nothing when a name has no article, and suggests near ones", async () => {
+    const client = worldClient();
+    await expect(
+      create({ content: "Near the [[Iron Mountains]] and [[Nowhere]].", unresolved_links: "refuse" }, client),
+    ).rejects.toThrow(
+      /2 links could not be made\. \[\[Iron Mountains\]\]: no article with this title \(near: "The Iron Mountains"\); \[\[Nowhere\]\]: no article with this title\. Nothing was sent\..*leave unresolved_links out/s,
     );
     expect(client.createArticle).not.toHaveBeenCalled();
   });
 
   it("refuses when several articles share the name", async () => {
     const client = worldClient();
-    await expect(create({ content: "The [[Silver Order]]." }, client)).rejects.toThrow(
+    await expect(create({ content: "The [[Silver Order]].", unresolved_links: "refuse" }, client)).rejects.toThrow(
       /A link could not be made\. \[\[Silver Order\]\]: 2 articles share this title \(ids a-4, a-5\)/,
     );
     expect(client.createArticle).not.toHaveBeenCalled();
@@ -196,7 +234,7 @@ describe("create article with [[links]]", () => {
 
   it("still refuses an unlinkable name that has shown text", async () => {
     const client = worldClient();
-    await expect(create({ content: "[[Nowhere|a lost place]]." }, client)).rejects.toThrow(
+    await expect(create({ content: "[[Nowhere|a lost place]].", unresolved_links: "refuse" }, client)).rejects.toThrow(
       /\[\[Nowhere\]\]: no article with this title/,
     );
     expect(client.createArticle).not.toHaveBeenCalled();
@@ -204,7 +242,7 @@ describe("create article with [[links]]", () => {
 
   it("refuses an unknown unresolved_links value", async () => {
     await expect(create({ content: "x", unresolved_links: "guess" }, worldClient())).rejects.toThrow(
-      /unresolved_links must be "refuse" or "plain"/,
+      /unresolved_links must be "keep", "plain" or "refuse"/,
     );
   });
 
@@ -235,9 +273,17 @@ describe("update article with [[links]]", () => {
     expect(answer.links.plain).toEqual([{ name: "Thronehold", why: "the article itself" }]);
   });
 
-  it("refuses an unlinkable name and changes nothing", async () => {
+  it("by default an update keeps an unlinkable name as a placeholder", async () => {
     const client = worldClient();
-    await expect(update({ author_notes: "Ask about [[Nowhere]]." }, client)).rejects.toThrow(
+    const answer = await update({ author_notes: "Ask about [[Nowhere]]." }, client);
+    expect(client.updateArticle.mock.calls[0][1]).toEqual({ authornotes: "Ask about [[Nowhere]]." });
+    expect(answer.links.waiting.map((w) => w.name)).toEqual(["Nowhere"]);
+    expect(answer.links.tell_the_user).toMatch(/^1 link was not made and is kept in the text as a placeholder: \[\[Nowhere\]\]/);
+  });
+
+  it("with unresolved_links refuse: refuses an unlinkable name and changes nothing", async () => {
+    const client = worldClient();
+    await expect(update({ author_notes: "Ask about [[Nowhere]].", unresolved_links: "refuse" }, client)).rejects.toThrow(
       /A link could not be made.*Nothing was sent/s,
     );
     expect(client.updateArticle).not.toHaveBeenCalled();
@@ -274,7 +320,7 @@ describe("tool definitions", () => {
   it("both article tools offer unresolved_links", () => {
     for (const name of ["worldanvil_create_article", "worldanvil_update_article"]) {
       const tool = getToolDefinitions().find((t) => t.name === name);
-      expect(tool.inputSchema.properties.unresolved_links.enum, name).toEqual(["refuse", "plain"]);
+      expect(tool.inputSchema.properties.unresolved_links.enum, name).toEqual(["keep", "plain", "refuse"]);
       expect(tool.description, name).toMatch(/\[\[/);
     }
   });

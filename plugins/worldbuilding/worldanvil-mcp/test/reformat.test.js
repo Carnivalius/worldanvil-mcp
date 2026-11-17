@@ -163,6 +163,75 @@ function articleClient(article, overrides = {}) {
 const base = (extra = {}) => ({ id: "a1", title: "Iron Mountains", state: "public", world: { id: "w1" }, ...extra });
 const reformat = (args, client) => call("worldanvil_reformat_article", { article_id: "a1", ...args }, client);
 
+describe("reformat links leftover [[placeholders]]", () => {
+  const others = [
+    { id: "a2", title: "Queen Elara", entityClass: "Person", state: "private" },
+    { id: "a1", title: "Thronehold", entityClass: "Settlement", state: "private" },
+  ];
+  const linkClient = (article) =>
+    articleClient(
+      { id: "a1", title: "Thronehold", state: "private", world: { id: "w1" }, ...article },
+      { listArticles: vi.fn(async () => ({ entities: others })) },
+    );
+
+  it("links a placeholder whose article now exists and leaves the rest waiting", async () => {
+    const client = linkClient({
+      content: "[p]Seat of [[Queen Elara]] and [[queen elara|the queen]], near [[Nowhere]].[/p]",
+      authornotes: "TODO: [[Queen Elara]] needs a page of her own.",
+    });
+    const answer = await reformat({}, client);
+    expect(answer.status).toBe("linked");
+    expect(client.updateArticle.mock.calls[0][1]).toEqual({
+      content: "[p]Seat of @[Queen Elara](Article:a2) and @[the queen](Article:a2), near [[Nowhere]].[/p]",
+      authornotes: "TODO: @[Queen Elara](Article:a2) needs a page of her own.",
+    });
+    expect(answer.links.linked.map((l) => l.name)).toEqual(["Queen Elara"]);
+    expect(answer.links.waiting.map((w) => w.name)).toEqual(["Nowhere"]);
+    expect(answer.note).toMatch(/were made into links/);
+    expect(answer.stored).toMatch(/stored exactly as sent/);
+  });
+
+  it("dry run says it would link, and sends nothing", async () => {
+    const client = linkClient({ content: "[p]Seat of [[Queen Elara]].[/p]" });
+    const answer = await reformat({ dry_run: true }, client);
+    expect(answer.status).toBe("would_link");
+    expect(answer.note).toMatch(/would be made into links/);
+    expect(client.updateArticle).not.toHaveBeenCalled();
+  });
+
+  it("only placeholders still waiting: nothing is sent, and it says which", async () => {
+    const client = linkClient({ content: "[p]Near [[Nowhere]].[/p]" });
+    const answer = await reformat({}, client);
+    expect(answer.status).toBe("current");
+    expect(answer.links.waiting.map((w) => w.name)).toEqual(["Nowhere"]);
+    expect(answer.note).toMatch(/have no article yet and were left as they are/);
+    expect(client.updateArticle).not.toHaveBeenCalled();
+  });
+
+  it("reformats and links in one save", async () => {
+    const client = linkClient({ content: "Seat of [[Queen Elara]].\n\n[h2]History[/h2]\n\nOld." });
+    const answer = await reformat({}, client);
+    expect(answer.status).toBe("reformatted");
+    expect(client.updateArticle).toHaveBeenCalledTimes(1);
+    const sent = client.updateArticle.mock.calls[0][1].content;
+    expect(sent).toMatch(/^\[p\]Seat of @\[Queen Elara\]\(Article:a2\)\.\[\/p\]/);
+    expect(sent).toMatch(/\[h2\|[0-9a-f-]{36}\]History/);
+  });
+
+  it("an article's own name is written as plain words, never a link to itself", async () => {
+    const client = linkClient({ content: "[p][[Thronehold]] is this page.[/p]" });
+    await reformat({}, client);
+    expect(client.updateArticle.mock.calls[0][1]).toEqual({ content: "[p]Thronehold is this page.[/p]" });
+  });
+
+  it("a marker inside code is left alone", async () => {
+    const client = linkClient({ content: "[p]Write this:[/p]\n[code][[Queen Elara]][/code]" });
+    const answer = await reformat({}, client);
+    expect(answer.status).toBe("current");
+    expect(client.updateArticle).not.toHaveBeenCalled();
+  });
+});
+
 describe("reformat article tool", () => {
   it("rewrites an old-form article and confirms what was stored", async () => {
     const client = articleClient(base({ content: OLD_FORM, authornotes: "CANON: cold." }));
